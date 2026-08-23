@@ -1,0 +1,17 @@
+name: doc-consistency
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 文档一致性 Lint (X-Degraded 枚举 / 错误码 / ADR 编号)
+        run: python scripts/doc_consistency_lint.py .

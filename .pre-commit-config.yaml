@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: doc-consistency-lint
+        name: 文档一致性 Lint
+        entry: python scripts/doc_consistency_lint.py .
+        language: system
+        pass_filenames: false
+        always_run: true   # 跨文件一致性，必须在每次 commit 全量跑
