@@ -18,10 +18,15 @@ dependencies = [
     "sse-starlette>=2.0.0",
     # 向量数据库
     "qdrant-client==1.19.0",
-    # 图数据库
-    "neo4j>=5.27.0",
+    # 全文检索 (J5/J6 ES 协同)
+    "elasticsearch>=8.12.0,<9",
+    # 图数据库 (2026.06 服务端兼容需 5.28+ 驱动)
+    "neo4j>=5.28.0",
     # 缓存与记忆
     "redis>=5.2.0",
+    # 会话 checkpoint (J21 LangGraph Postgres)
+    "langgraph-checkpoint-postgres>=2.0.0",
+    "psycopg[binary]>=3.2.0",
     # Embedding & Reranker
     "sentence-transformers==6.0.0",
     "FlagEmbedding>=1.3.0",
@@ -30,11 +35,29 @@ dependencies = [
     "pydantic-settings>=2.7.0",
     "pyyaml>=6.0.0",
     "httpx>=0.28.0",
-    # Web 搜索
+    # Web 搜索 (J4 双轨: Tavily 主 + DDG 兜底)
     "tavily-python>=0.5.0",
+    "ddgs>=9.0.0",
+    # 认证 (J16 JWT 签发与校验)
+    "pyjwt>=2.10.0",
+    # Agent 服务形态 (J19 langgraph-server 开发态)
+    "langgraph-cli[inmem]>=0.3.0",
     # 可观测性
     "prometheus-client>=0.22.0",
     # NLP 工具
     "langdetect>=1.0.9",
     "chardet>=5.2.0",
+]
+
+[project.optional-dependencies]
+# 数据管道增强 (P3 清洗 / 质量门控 MinHash / P7-G5 Leiden 社区检测)
+pipeline = [
+    "beautifulsoup4>=4.12",
+    "datasketch>=1.6",
+    "igraph>=0.11",
+    "leidenalg>=0.10",
+]
+# 自托管可观测备选 (第10层: LangSmith 二选一, 本机已有 v4 镜像)
+observability-langfuse = [
+    "langfuse>=3.0.0",
 ]

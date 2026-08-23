@@ -1,48 +1,150 @@
 # ==================================================
-# GraphRAG 本地开发环境编排
+# GraphRAG 本地开发环境编排 (v2.2 · J19 双服务)
+# 版本基准以 spec 第九章 9.4 为准 (2026-08-22 本机镜像清点):
+#   neo4j:latest 当前即 2026.06.0 community | ES 8.12.0 | PG 17 | qdrant latest
+# 注意:
+#   - Ollama 宿主机原生安装(非容器化), 服务经 host.docker.internal:11434 访问
+#   - agent 面依赖 app/agent/graph.py 的 build_agent_graph 完整实现后方可启动
 # ==================================================
 
-version: "3.8"
-
 services:
-  # Neo4j 图数据库
-  neo4j:
-    image: neo4j:5.27-community
-    container_name: graphrag-neo4j
+  # --- 业务面 (J19): 认证/会话/反馈/图谱代理/config/public/precheck/admin ---
+  app:
+    build: .
+    container_name: graphrag-app
     ports:
-      - "7474:7474"   # HTTP Browser
-      - "7687:7687"   # Bolt
+      - "8000:8000"
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # Linux 下访问宿主 Ollama
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      neo4j:
+        condition: service_started
+    restart: unless-stopped
+
+  # --- Agent 面 (J19): langgraph-server 托管全链路图, 前端 SDK 直连 :8001 ---
+  agent:
+    build: .
+    container_name: graphrag-agent
+    command: ["langgraph", "dev", "--no-browser", "--port", "8001", "--host", "0.0.0.0"]
+    ports:
+      - "8001:8001"
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --- LangGraph thread checkpoint (J21 会话状态权威源) ---
+  postgres:
+    image: postgres:17
+    container_name: graphrag-postgres
+    environment:
+      POSTGRES_USER: graphrag
+      POSTGRES_PASSWORD: graphrag
+      POSTGRES_DB: graphrag
+    ports:
+      - "5433:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U graphrag"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # --- 向量库 (named sparse vectors 需 >=1.10, 本机 latest 满足) ---
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: graphrag-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:6333/readyz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # --- 图谱权威源 (latest = 2026.06.0 community, 文档基准) ---
+  neo4j:
+    image: neo4j:latest
+    container_name: graphrag-neo4j
     environment:
       - NEO4J_AUTH=neo4j/password
       - NEO4J_PLUGINS=["apoc"]
+    ports:
+      - "7474:7474"
+      - "7687:7687"
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
     restart: unless-stopped
 
-  # Qdrant 向量数据库
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: graphrag-qdrant
+  # --- 全文检索 (IK 分词器首次启动自动安装, 匹配 8.12.0) ---
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    container_name: graphrag-es
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    command: >
+      bash -c "bin/elasticsearch-plugin install --batch https://get.infini.cloud/elasticsearch/analysis-ik/8.12.0 || echo '[skip] IK already installed';
+               exec bin/elasticsearch"
     ports:
-      - "6333:6333"   # HTTP API
-      - "6334:6334"   # gRPC
+      - "9200:9200"
     volumes:
-      - qdrant_data:/qdrant/storage
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
 
-  # Redis 缓存与记忆
+  # --- 缓存与记忆 (AOF 开启, 工作记忆不丢失) ---
   redis:
     image: redis:7-alpine
     container_name: graphrag-redis
+    command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
 
+  # --- Ollama (可选 Profile B): 宿主机原生安装, 不在此容器化 ---
+  # 启动方式(宿主机): ollama serve && ollama pull qwen2.5:7b
+  # 容器内访问地址: http://host.docker.internal:11434 (见 config/models.yaml local-qwen7b)
+
 volumes:
+  pg_data:
+  qdrant_data:
   neo4j_data:
   neo4j_logs:
-  qdrant_data:
+  es_data:
   redis_data:

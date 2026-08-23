@@ -1,0 +1,43 @@
+# ==================================================
+# 可靠性参数: 超时 / 降级 / 并发保护 (D5/D6)
+# spec: 第九章 9.2 降级矩阵 · 9.3 GPU 资源规划
+# 原则: 任一依赖故障不中断服务, 降级而非报错
+# 支持受限热更新 (J18): admin 接口写回本文件 + 重新校验
+# ==================================================
+
+version: 1
+
+timeouts_seconds:
+  llm_call: 30            # 单次 LLM API/本地调用
+  embedding: 5
+  reranker: 2             # 超时 -> 放弃精排, 直接用融合层粗排 Top-K
+  qdrant: 3
+  neo4j: 3                # 超时 -> 跳过 graph/fulltext/global 三路 (X-Degraded: no-graph)
+  elasticsearch: 3
+  redis: 1                # 失败即 fail-open, 不阻塞主链路 (no-cache/no-memory)
+  web_search: 3           # 快速失败取消该路 gather 任务
+
+retry:
+  max_attempts: 1         # LLM 主条目失败重试次数 (之后走 fallback_chain)
+  backoff: exponential    # 云端 API 限流退避
+  base_ms: 500
+
+concurrency:
+  local_llm_semaphore: 1          # Profile B 本地推理串行保护 (bulkhead)
+  cloud_llm_semaphore: 4          # Profile A 云端 API 并发上限 (配合限流退避)
+  reranker_semaphore: 1           # 与 LLM 共享显存, 串行化
+  retrieval_gather_timeout_s: 6   # 多路检索整体兜底超时
+
+degradation:            # 降级开关 (与 X-Degraded 响应头枚举对应)
+  allow_no_graph: true
+  allow_no_rerank: true
+  allow_no_cache: true
+  allow_no_memory: true
+  allow_llm_fallback: true
+  budget_exhausted_action: degrade_with_partial   # J9/J18: 超限降级回答而非报错
+
+agent_budget:           # M3 循环终止预算
+  max_retrieval_rounds: 3
+  self_correction_max_retries: 1
+  token_budget_total: 32000
+  langgraph_recursion_limit: 15

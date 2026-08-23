@@ -1,0 +1,24 @@
+# ==================================================
+# 实体别名表 (P7-G2 实体规范化与对齐)
+# 规则: canonical 为规范实体名; aliases 中的提及一律归并到 canonical
+# 维护方式: 人工维护 + LLM 批量生成候选后人工确认入库
+# ==================================================
+
+version: 1
+
+groups:
+  - canonical: 番茄
+    type: Ingredient
+    aliases: [西红柿, tomato, 蕃茄]
+
+  - canonical: 鲈鱼
+    type: Ingredient
+    aliases: [海鲈鱼, 河鲈, bass]
+
+  - canonical: 清蒸
+    type: Technique
+    aliases: [清蒸法, steaming]
+
+  - canonical: 红烧肉
+    type: Dish
+    aliases: [毛氏红烧肉, braised pork]

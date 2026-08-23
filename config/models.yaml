@@ -1,0 +1,42 @@
+# ==================================================
+# 模型注册表 + 角色路由 + fallback 链
+# spec: GraphRAG_架构深度优化_task-c57.md 第九章 9.1 (J1/J2)
+# 规则:
+#   - 条目名 = 请求参数可引用的 model 标识
+#   - api_key_ref 指向环境变量名, 密钥不落本文件明文
+#   - Embedding/Reranker 不进注册表 (J3): 固定本地 BGE-M3 +
+#     bge-reranker-v2-m3 进程内 FlagEmbedding 加载
+# ==================================================
+
+models:
+  deepseek-chat:
+    base_url: https://api.deepseek.com/v1
+    api_key_ref: DEEPSEEK_API_KEY
+    model: deepseek-chat
+    params:
+      temperature: 0.3
+
+  gpt-main:
+    base_url: https://api.openai.com/v1
+    api_key_ref: OPENAI_API_KEY
+    model: gpt-4o
+    params:
+      temperature: 0.2
+
+  local-qwen7b:
+    base_url: http://host.docker.internal:11434/v1   # Ollama 宿主机原生安装, 非容器化 (v2.2 基准)
+    api_key_ref: LOCAL_KEY                           # 本地端点占位, 可为空串
+    model: qwen2.5:7b
+
+# --- 角色化路由 (J2): 请求参数 model 可临时覆盖角色默认 ---
+roles:
+  query_understanding: local-qwen7b   # M2 合并式结构化调用
+  generator: deepseek-chat            # 主生成
+  judge: local-qwen7b                 # J10 本地 LLM-as-Judge 忠实度校验
+  extractor: local-qwen7b             # J13 离线实体/关系抽取
+
+# --- 故障降级链: generator 角色条目失败时按序回退 ---
+fallback_chain:
+  - deepseek-chat
+  - gpt-main
+  - local-qwen7b

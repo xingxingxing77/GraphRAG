@@ -1,0 +1,54 @@
+# ==================================================
+# 图 Schema 定义 (J12 混合式: 核心域白名单 + 开放区)
+# spec: 第五章 P7-G1
+# 白名单内: 质量可控, Cypher 检索模板固定
+# 开放区:   type=Other, 不参与固定模板检索, 定期人工审核升级
+# ==================================================
+
+version: 1
+
+node_types:
+  Dish:
+    description: 菜品/食谱
+    key: canonical_name
+    properties: [name, aliases, category, difficulty]
+  Ingredient:
+    description: 食材
+    key: canonical_name
+    properties: [name, aliases, category]        # category: 主料/辅料/调味
+  Step:
+    description: 烹饪步骤
+    key: uuid
+    properties: [seq, instruction, duration_hint]
+  Technique:
+    description: 烹饪技法 (蒸/炒/炖...)
+    key: canonical_name
+    properties: [name, description]
+
+edge_types:
+  - type: REQUIRES
+    from: Dish
+    to: Ingredient
+    properties: [amount, unit, optional]
+  - type: HAS_STEP
+    from: Dish
+    to: Step
+    properties: [order]
+  - type: APPLIES_TO
+    from: Technique
+    to: Dish
+    properties: []
+
+# --- 实体对齐 (P7-G2) ---
+alignment:
+  vector_merge_threshold: 0.92      # >= 阈值且类型相同 -> 自动归并
+  manual_review_band: [0.80, 0.92)  # 灰区 -> 人工审核队列
+
+# --- 开放区规则 (J12) ---
+open_zone:
+  default_type: Other
+  participates_in_template_search: false
+  review_queue:
+    enabled: true
+    order_by: mention_frequency      # 按出现频次排序供人工审核
+    promote_replays_relations: true  # 升级白名单后重放其关联三元组

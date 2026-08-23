@@ -16,11 +16,16 @@ sse-starlette>=2.0.0
 # === 向量数据库 ===
 qdrant-client==1.19.0
 
-# === 图数据库 ===
-neo4j>=5.27.0
+# === 全文检索 (J5/J6 ES 协同) ===
+elasticsearch>=8.12.0,<9
 
-# === 缓存与记忆 ===
+# === 图数据库 (2026.06 服务端兼容需 5.28+ 驱动) ===
+neo4j>=5.28.0
+
+# === 缓存与记忆 / 会话 checkpoint (J21) ===
 redis>=5.2.0
+langgraph-checkpoint-postgres>=2.0.0
+psycopg[binary]>=3.2.0
 
 # === Embedding & Reranker ===
 sentence-transformers==6.0.0
@@ -32,8 +37,13 @@ pydantic-settings>=2.7.0
 pyyaml>=6.0.0
 httpx>=0.28.0
 
-# === Web 搜索 ===
+# === Web 搜索 (J4 双轨: Tavily 主 + DDG 兜底) ===
 tavily-python>=0.5.0
+ddgs>=9.0.0
+
+# === 认证 (J16) / Agent 服务形态 (J19) ===
+pyjwt>=2.10.0
+langgraph-cli[inmem]>=0.3.0
 
 # === 可观测性 ===
 prometheus-client>=0.22.0
@@ -41,3 +51,7 @@ prometheus-client>=0.22.0
 # === NLP 工具 ===
 langdetect>=1.0.9
 chardet>=5.2.0
+
+# --- 可选 extras: uv sync --extra pipeline / --extra observability-langfuse ---
+# pipeline: beautifulsoup4, datasketch, igraph, leidenalg
+# observability-langfuse: langfuse
