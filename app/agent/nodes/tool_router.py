@@ -4,11 +4,14 @@
 根据执行计划选择并调用合适的工具。
 """
 
+# --- 标准库 ---
+from typing import Any
+
 # --- 本地模块 ---
 from app.agent.state import AgentState
 
 
-async def tool_router_node(state: AgentState) -> dict:
+async def tool_router_node(state: AgentState) -> dict[str, Any]:
     """工具路由节点：根据计划选择工具并执行。
 
     根据当前计划步骤，决定调用哪个检索工具

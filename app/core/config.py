@@ -20,6 +20,9 @@ class AppSettings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        # 无关环境变量（LangChain 生态/工具链注入）不阻断启动；
+        # 必需项缺失的 fail-fast 由各模块自行校验（05 §6/D7）
+        extra="ignore",
     )
 
     # 应用信息
@@ -27,13 +30,31 @@ class AppSettings(BaseSettings):
     app_version: str = Field(default="0.1.0", description="应用版本")
     debug: bool = Field(default=False, description="调试模式")
 
-    # CORS
-    cors_origins: list[str] = Field(default=["*"], description="允许的跨域来源")
+    # CORS：显式白名单（禁用 "*" + credentials 组合，架构第 1 层注；
+    # 开发期含 Vite dev 源，生产经环境变量收紧）
+    cors_origins: list[str] = Field(
+        default=["http://localhost:5173"], description="允许的跨域来源"
+    )
+
+    # --- 密钥与认证（仅变量名/值经环境变量注入，D7/J16） ---
+    jwt_secret: str = Field(
+        default="change-me", description="JWT 签名密钥（与 langgraph-server 共享，J16/J19）"
+    )
+    deepseek_api_key: Optional[str] = Field(
+        default=None, description="models.yaml api_key_ref=DEEPSEEK_API_KEY"
+    )
+    openai_api_key: Optional[str] = Field(
+        default=None, description="models.yaml api_key_ref=OPENAI_API_KEY"
+    )
+    local_key: Optional[str] = Field(
+        default=None, description="本地端点占位密钥（可为空串）"
+    )
+    tavily_api_key: Optional[str] = Field(
+        default=None, description="Web 搜索主轨（缺省自动降级 DDG，J4）"
+    )
 
     # Ollama 配置
     ollama_base_url: str = Field(default="http://localhost:11434", description="Ollama 服务地址")
-    llm_model: str = Field(default="qwen2.5:32b", description="主 LLM 模型名称")
-    llm_query_model: str = Field(default="qwen2.5:7b", description="查询理解用轻量模型")
     embedding_model: str = Field(default="bge-m3", description="Embedding 模型名称")
     reranker_model: str = Field(default="bge-reranker-v2-m3", description="Reranker 模型名称")
 
@@ -52,12 +73,24 @@ class AppSettings(BaseSettings):
     redis_port: int = Field(default=6379, description="Redis 端口")
     redis_db: int = Field(default=0, description="Redis DB 编号")
 
+    # Elasticsearch 配置（J5/J6 全文协同）
+    elasticsearch_host: str = Field(
+        default="http://localhost:9200", description="Elasticsearch 服务地址"
+    )
+
+    # Postgres 配置（J21 LangGraph thread checkpoint）
+    postgres_dsn: str = Field(
+        default="postgresql://graphrag:graphrag@localhost:5433/graphrag",
+        description="Postgres checkpoint 连接串",
+    )
+
     # 检索配置
     retrieval_top_k: int = Field(default=20, description="粗排召回数量")
     rerank_top_k: int = Field(default=5, description="精排后保留数量")
     rerank_threshold: float = Field(default=0.3, description="Reranker 分数阈值")
 
-    # LangSmith 配置
+    # LangSmith 配置（第 10 层可观测）
+    langchain_tracing_v2: bool = Field(default=False, description="LangSmith 追踪开关")
     langsmith_api_key: Optional[str] = Field(default=None, description="LangSmith API Key")
     langsmith_project: str = Field(default="graphrag", description="LangSmith 项目名称")
 

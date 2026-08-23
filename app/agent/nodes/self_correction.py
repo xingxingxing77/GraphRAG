@@ -4,11 +4,14 @@
 检查生成内容与检索证据的一致性，检测幻觉。
 """
 
+# --- 标准库 ---
+from typing import Any
+
 # --- 本地模块 ---
 from app.agent.state import AgentState
 
 
-async def self_correction_node(state: AgentState) -> dict:
+async def self_correction_node(state: AgentState) -> dict[str, Any]:
     """自校正节点：验证生成内容的忠实度。
 
     检查生成的答案是否与检索证据一致，

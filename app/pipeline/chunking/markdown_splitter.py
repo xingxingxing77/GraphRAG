@@ -1,77 +1,141 @@
 """
-Markdown 标题层级切分器。
+Markdown 标题层级切分器（架构 P4 第一级结构分块 · 单元 2.1）。
 
-按 Markdown 标题（ATX 风格 # ~ ######）将文档切分为
-带有标题路径信息的文档块。
+按 ATX 标题（# ~ ####）将文档切分为带标题路径的节（HeaderSection），
+维护标题栈生成 title_path；围栏代码块内的伪标题不作切分点。
 """
 
 # --- 标准库 ---
 import re
-from typing import Any
+from dataclasses import dataclass, field
 
-# --- 本地模块 ---
-from app.pipeline.base import Chunk
-
-
-# 匹配 ATX 标题
+# 匹配 ATX 标题（行首 # ~ ######）
 _HEADER_PATTERN: re.Pattern[str] = re.compile(
-    r"^(?P<level>#{1,6})\s+(?P<title>.+)$",
-    re.MULTILINE,
+    r"^(?P<level>#{1,6})\s+(?P<title>.+?)\s*#*\s*$"
 )
+
+# 默认切分层级（chunking_config.yaml first_level.headers_to_split_on）
+_DEFAULT_HEADER_LEVELS: tuple[int, ...] = (1, 2, 3, 4)
+
+
+@dataclass
+class HeaderSection:
+    """标题切分产出的文档节（分块中间表示）。
+
+    Attributes:
+        title_path: 标题路径（如 ["清蒸鲈鱼", "操作步骤", "蒸制"]）。
+        level: 当前节所属标题层级（0 表示文档根）。
+        start_offset: 节内容在原文中的起始字符偏移。
+        end_offset: 节内容在原文中的结束字符偏移（不含）。
+        text: 节内容文本（原文切片，含标题行）。
+    """
+
+    title_path: list[str] = field(default_factory=list)
+    level: int = 0
+    start_offset: int = 0
+    end_offset: int = 0
+    text: str = ""
 
 
 class MarkdownHeaderSplitter:
     """Markdown 标题层级切分器。
 
-    根据 Markdown 标题将文档切分为多个文档块，
-    每个块记录其所属的标题路径（title_path）。
-
-    例如，位于 ``## 步骤 > ### 第一步`` 下的内容，
-    其 title_path 为 ``"步骤 > 第一步"``。
-
     Attributes:
-        headers_to_split_on: 要作为切分点的标题级别列表，
-            默认 [(1, "#"), (2, "##"), ..., (6, "######")]。
+        header_levels: 作为切分点的标题级别集合（默认 1-4 级）。
     """
 
-    def __init__(
-        self,
-        headers_to_split_on: list[tuple[str, str]] | None = None,
-    ) -> None:
-        """初始化 MarkdownHeaderSplitter。
+    def __init__(self, header_levels: list[int] | None = None) -> None:
+        """初始化切分器。
 
         Args:
-            headers_to_split_on: 要切分的标题级别列表，
-                格式为 ``[("header_name", "# 前缀"), ...]``。
-                默认使用全部 6 级标题。
+            header_levels: 参与切分的标题级别列表，缺省 [1,2,3,4]。
         """
-        if headers_to_split_on is None:
-            self.headers_to_split_on: list[tuple[str, str]] = [
-                (f"h{i}", "#" * i) for i in range(1, 7)
-            ]
-        else:
-            self.headers_to_split_on = headers_to_split_on
+        self.header_levels = set(header_levels or _DEFAULT_HEADER_LEVELS)
 
-    def split(
-        self,
-        text: str,
-        headers: list[tuple[str, str]],
-    ) -> list[Chunk]:
-        """按标题切分文本。
+    def split(self, text: str) -> list[HeaderSection]:
+        """按标题切分文本为节列表。
+
+        无标题时返回单个根节（整篇文档），供字符级兜底判定。
 
         Args:
             text: 待切分的 Markdown 文本。
-            headers: 标题配置列表，格式为 ``[("标题名", "# 前缀"), ...]``。
-                决定哪些级别的标题作为切分边界。
 
         Returns:
-            切分后的 Chunk 列表，每个 chunk 的 metadata 中包含：
-            - ``title_path``: 标题路径字符串。
-            - ``header_level``: 当前块所属标题级别。
+            HeaderSection 列表（按原文顺序，偏移精确到字符）。
         """
-        # TODO: 1. 扫描文本，识别所有标题行位置
-        # TODO: 2. 按标题行切分文本段落
-        # TODO: 3. 维护标题栈（title stack），生成 title_path
-        # TODO: 4. 为每个段落构建 Chunk 对象
-        # TODO: 5. 返回 Chunk 列表
-        raise NotImplementedError
+        headings = self._scan_headings(text)
+        if not headings:
+            return [
+                HeaderSection(
+                    title_path=[],
+                    level=0,
+                    start_offset=0,
+                    end_offset=len(text),
+                    text=text,
+                )
+            ]
+
+        sections: list[HeaderSection] = []
+        # 首个标题之前的前言（preamble）作为根节
+        if headings[0][0] > 0:
+            sections.append(
+                HeaderSection(
+                    title_path=[],
+                    level=0,
+                    start_offset=0,
+                    end_offset=headings[0][0],
+                    text=text[: headings[0][0]],
+                )
+            )
+
+        stack: list[tuple[int, str]] = []  # (level, title) 标题栈
+        for i, (offset, level, title) in enumerate(headings):
+            # 弹栈至当前级别的父级，生成 title_path
+            while stack and stack[-1][0] >= level:
+                stack.pop()
+            stack.append((level, title))
+            title_path = [t for _, t in stack]
+
+            end = headings[i + 1][0] if i + 1 < len(headings) else len(text)
+            sections.append(
+                HeaderSection(
+                    title_path=title_path,
+                    level=level,
+                    start_offset=offset,
+                    end_offset=end,
+                    text=text[offset:end],
+                )
+            )
+        return sections
+
+    def _scan_headings(self, text: str) -> list[tuple[int, int, str]]:
+        """扫描标题行（跳过围栏代码块内伪标题）。
+
+        Args:
+            text: Markdown 文本。
+
+        Returns:
+            [(行偏移, 级别, 标题文本), ...] 按偏移升序。
+        """
+        headings: list[tuple[int, int, str]] = []
+        in_fence = False
+        fence_marker = ""
+        offset = 0
+        for line in text.splitlines(keepends=True):
+            stripped = line.strip()
+            if not in_fence and (
+                stripped.startswith("```") or stripped.startswith("~~~")
+            ):
+                in_fence = True
+                fence_marker = stripped[:3]
+            elif in_fence and stripped.startswith(fence_marker):
+                in_fence = False
+                fence_marker = ""
+            elif not in_fence:
+                m = _HEADER_PATTERN.match(line.rstrip("\n"))
+                if m:
+                    level = len(m.group("level"))
+                    if level in self.header_levels:
+                        headings.append((offset, level, m.group("title").strip()))
+            offset += len(line)
+        return headings

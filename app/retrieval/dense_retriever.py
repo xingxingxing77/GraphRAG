@@ -5,29 +5,12 @@ Qdrant 密集向量检索器。
 """
 
 # --- 标准库 ---
-from dataclasses import dataclass
 from typing import Any
 
 # --- 本地模块 ---
+from app.core.models import RetrievalResult
 from app.db.qdrant_client import QdrantDBClient
-from app.embedding.service import EmbeddingService
-
-
-@dataclass
-class RetrievalResult:
-    """检索结果数据类。
-
-    Attributes:
-        content: 文档块内容。
-        score: 相关性分数。
-        metadata: 文档元数据。
-        source: 检索来源标识。
-    """
-
-    content: str
-    score: float
-    metadata: dict[str, Any]
-    source: str = "dense"
+from app.embedding.base import EmbeddingService
 
 
 class DenseRetriever:

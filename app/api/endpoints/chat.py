@@ -1,69 +1,42 @@
 """
-聊天接口端点。
+聊天业务面端点（02 §3.8）。
 
-提供主聊天 API（POST /chat），支持 SSE 流式响应。
+J19 双服务边界：聊天主链路（流式）在 langgraph-server :8001，
+业务面仅承载 POST /chat/precheck —— L1 语义缓存短路查询（J22）。
 """
 
-# --- 标准库 ---
-import json
-from typing import AsyncGenerator
-
 # --- 第三方库 ---
-from fastapi import APIRouter, Depends
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter
 
 # --- 本地模块 ---
-from app.api.models import ChatRequest, ChatResponse
-from app.api.deps import get_agent, get_redis_client
-from app.db.redis_client import RedisClient
-from langgraph.graph.state import CompiledStateGraph
+from app.core.models import PrecheckRequest, PrecheckResponse
 
 router = APIRouter()
 
 
-@router.post("/chat", response_model=ChatResponse)
-async def chat(
-    request: ChatRequest,
-    agent: CompiledStateGraph = Depends(get_agent),
-    redis: RedisClient = Depends(get_redis_client),
-) -> ChatResponse | StreamingResponse:
-    """主聊天接口。
+@router.post("/chat/precheck", response_model=PrecheckResponse)
+async def chat_precheck(request: PrecheckRequest) -> PrecheckResponse:
+    """L1 语义缓存短路查询（J22/H2）。
 
-    接收用户查询，通过 LangGraph Agent 处理后返回答案。
-    支持 SSE 流式响应，实时推送 Agent 思考步骤和最终答案。
+    查询向量 ANN 检索 Qdrant cache collection，score >= 0.95 命中：
+    - 命中返回 {hit:true, answer, citations, cache_score, matched_query}
+    - 未命中返回 {hit:false, suggested_run}（意图启发式建议档位）
+
+    缓存永不阻塞主链路：Redis/Qdrant 异常时返回 {hit:false}
+    并置 X-Degraded: no-cache，不报错。
 
     Args:
-        request: 聊天请求。
-        agent: LangGraph Agent 实例。
-        redis: Redis 客户端。
+        request: precheck 请求（query + session_id）。
 
     Returns:
-        ChatResponse（非流式）或 StreamingResponse（流式 SSE）。
+        PrecheckResponse: 命中/未命中两态。
+
+    Raises:
+        HTTPException: CHAT_400_EMPTY_QUERY（空查询由模型校验拦截）。
     """
-    # TODO: 检查语义缓存（L1 缓存命中则直接返回）
-    # TODO: 构建 Agent 输入 state
-    # TODO: 如果 stream=True，返回 SSE StreamingResponse
-    # TODO: 如果 stream=False，同步执行并返回 ChatResponse
-    # TODO: 将结果写入语义缓存
-    raise NotImplementedError
-
-
-async def _stream_agent_response(
-    agent: CompiledStateGraph,
-    input_state: dict,
-) -> AsyncGenerator[str, None]:
-    """流式生成 Agent 响应的 SSE 事件。
-
-    将 Agent 的每个节点执行步骤和最终答案以 SSE 格式推送。
-
-    Args:
-        agent: LangGraph Agent 实例。
-        input_state: Agent 输入状态。
-
-    Yields:
-        SSE 格式的 JSON 字符串。
-    """
-    # TODO: 使用 agent.astream() 逐步执行
-    # TODO: 将每个节点的输出格式化为 SSE event
-    # TODO: 最终答案格式化为 {"event": "answer", "data": {...}}
+    # TODO: JWT 鉴权依赖注入
+    # TODO: 查询向量化（EmbeddingService）
+    # TODO: Qdrant rag_cache ANN 查询（阈值 0.95，H2）
+    # TODO: miss 时按意图启发式给出 suggested_run.latency_tier
+    # TODO: 存储异常降级 {hit:false} + X-Degraded: no-cache
     raise NotImplementedError

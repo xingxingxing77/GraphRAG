@@ -4,11 +4,14 @@
 分析用户查询，制定检索和推理计划。
 """
 
+# --- 标准库 ---
+from typing import Any
+
 # --- 本地模块 ---
 from app.agent.state import AgentState
 
 
-async def planner_node(state: AgentState) -> dict:
+async def planner_node(state: AgentState) -> dict[str, Any]:
     """规划节点：分析问题并制定执行计划。
 
     使用主 LLM（如 Qwen2.5-32B）分析用户查询，

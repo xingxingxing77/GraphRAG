@@ -1,0 +1,22 @@
+/*
+ * 全局样式（06 §11 双令牌体系）：
+ * - shadcn theme tokens（--background 系）：仅供 shadcn/ui 基础组件（随 shadcn init 引入）
+ * - BUI 令牌（--color-* / --shadow-* / --radius-*）：仅定义于本文件（J24，10.7 单元
+ *   按前端设计系统落地方案 §3 全量落地）
+ * 暗色模式经 class="dark" 切换并持久化。
+ */
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+body {
+  @apply antialiased;
+}

@@ -4,15 +4,18 @@ Agent 工具集定义。
 使用 @tool 装饰器定义 LangGraph Agent 可调用的工具。
 """
 
+# --- 标准库 ---
+from typing import Any
+
 # --- 第三方库 ---
 from langchain_core.tools import tool
 
 # --- 本地模块 ---
-from app.retrieval.dense_retriever import RetrievalResult
+from app.core.models import RetrievalResult  # noqa: F401 (待实现检索器接入时使用)
 
 
 @tool
-def search_vector_store(query: str, top_k: int = 10) -> list[dict]:
+def search_vector_store(query: str, top_k: int = 10) -> list[dict[str, Any]]:
     """在向量数据库中执行语义检索。
 
     Args:
@@ -27,7 +30,7 @@ def search_vector_store(query: str, top_k: int = 10) -> list[dict]:
 
 
 @tool
-def search_knowledge_graph(entity_names: list[str], depth: int = 2) -> list[dict]:
+def search_knowledge_graph(entity_names: list[str], depth: int = 2) -> list[dict[str, Any]]:
     """在知识图谱中执行图遍历检索。
 
     Args:
@@ -42,7 +45,7 @@ def search_knowledge_graph(entity_names: list[str], depth: int = 2) -> list[dict
 
 
 @tool
-def search_web(query: str, top_k: int = 5) -> list[dict]:
+def search_web(query: str, top_k: int = 5) -> list[dict[str, Any]]:
     """在 Web 上搜索外部知识。
 
     Args:
@@ -57,7 +60,7 @@ def search_web(query: str, top_k: int = 5) -> list[dict]:
 
 
 @tool
-def get_user_memory(user_id: str) -> dict:
+def get_user_memory(user_id: str) -> dict[str, Any]:
     """获取用户长期记忆。
 
     Args:

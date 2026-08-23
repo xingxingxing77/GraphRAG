@@ -1,0 +1,34 @@
+# 契约测试工作流（09 §6：分支保护必跑 doc-lint + 契约门禁）
+name: contract-test
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pytest pytest-asyncio mypy types-PyYAML
+
+      - name: Doc consistency lint (R1/R2)
+        run: python scripts/doc_consistency_lint.py
+
+      - name: mypy --strict (contract layer)
+        run: python -m mypy --strict --ignore-missing-imports app/core app/llm app/agent app/api/errors.py
+
+      - name: Contract gates (09 §4)
+        run: python -m pytest tests/contract -q
+
+      - name: Unit tests
+        run: python -m pytest tests -q

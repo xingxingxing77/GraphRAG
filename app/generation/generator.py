@@ -12,7 +12,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage, HumanMessage
 
 # --- 本地模块 ---
-from app.retrieval.dense_retriever import RetrievalResult
+from app.core.models import RetrievalResult
 
 
 class StreamGenerator:

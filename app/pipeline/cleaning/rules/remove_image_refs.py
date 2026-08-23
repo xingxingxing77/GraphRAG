@@ -1,31 +1,23 @@
 """
-去除 Markdown 图片引用规则。
+去除 Markdown 图片引用规则（架构 P3 · 单元 1.3）。
 
-匹配并移除 ``![alt](url)`` 格式的图片引用，
-减少无关内容对检索质量的干扰。
+移除 ``![alt](url)`` 图片引用（配置 cleaning_rules.yaml priority 1）。
 """
 
 # --- 标准库 ---
 import re
-from dataclasses import replace
 from typing import Any
 
 # --- 本地模块 ---
-from app.pipeline.base import ParsedDocument
+from app.core.models import CleanedDocument
 from app.pipeline.cleaning.rules.base_rule import CleaningRule
 
-
 # 匹配 Markdown 图片引用：![任意 alt](任意 url)
-_IMAGE_REF_PATTERN: re.Pattern[str] = re.compile(
-    r"!\[.*?\]\(.*?\)"
-)
+_IMAGE_REF_PATTERN: re.Pattern[str] = re.compile(r"!\[.*?\]\(.*?\)")
 
 
 class RemoveImageRefsRule(CleaningRule):
     """去除 Markdown 图片引用规则。
-
-    扫描文档文本，移除所有 ``![alt](url)`` 格式的图片引用标记，
-    保留其他 Markdown 语法（如超链接）不受影响。
 
     Attributes:
         name: 规则名称 "RemoveImageRefs"。
@@ -37,21 +29,23 @@ class RemoveImageRefsRule(CleaningRule):
 
     async def process(
         self,
-        doc: ParsedDocument,
+        doc: CleanedDocument,
         config: dict[str, Any],
-    ) -> ParsedDocument:
+    ) -> CleanedDocument:
         """移除文档文本中的 Markdown 图片引用。
 
         Args:
-            doc: 待处理的解析后文档。
-            config: 运行时配置参数，支持 key:
-                - ``pattern``: 自定义正则表达式（覆盖默认模式）。
+            doc: 待处理文档。
+            config: 支持 key ``pattern``（自定义正则，覆盖默认）。
 
         Returns:
-            文本中图片引用被移除后的文档。
+            图片引用被移除后的文档。
         """
-        # TODO: 1. 从 config 中获取自定义 pattern（如有）
-        # TODO: 2. 使用 re.sub(r'!\[.*?\]\(.*?\)', '', text) 替换
-        # TODO: 3. 清理替换后产生的多余空行
-        # TODO: 4. 返回更新后的 ParsedDocument
-        raise NotImplementedError
+        pattern = _IMAGE_REF_PATTERN
+        custom = config.get("pattern")
+        if custom:
+            pattern = re.compile(str(custom))
+        text = pattern.sub("", doc.text)
+        # 清理替换后残留的空白行
+        text = re.sub(r"[ \t]+\n", "\n", text)
+        return doc.model_copy(update={"text": text})

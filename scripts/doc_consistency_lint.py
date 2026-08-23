@@ -42,6 +42,7 @@ DOCS = [
     "06_前端开发指南.md",
     "07_联调与测试计划.md",
     "GraphRAG_系统架构文档.md",
+    "11_数据库与缓存实施路线图.md",
 ]
 
 # R3 中不属于 ADR 但合法出现、需豁免的编号式记号
@@ -54,16 +55,15 @@ ADR_SERIES = "[JMDHABEGP]"
 def load_docs(docs_dir: Path) -> dict[str, str]:
     """加载规范文档。
 
-    G:\\RAG-v0 结构适配: 文档主体在 docs_dir(默认 docs/)，
+    G:\\RAG-v0 结构适配: 文档主体在 docs/ 子目录，
     少数规约文件(如 AGENT.md)保留在仓库根目录 —— 依次回退查找。
     """
-    repo_root = docs_dir.parent
+    repo_root = docs_dir.parent if docs_dir.name == "docs" else docs_dir
+    candidates = [docs_dir, repo_root / "docs", repo_root]
     texts: dict[str, str] = {}
     for name in DOCS:
-        p = docs_dir / name
-        if not p.exists():
-            p = repo_root / name
-        if p.exists():
+        p = next((c / name for c in candidates if (c / name).exists()), None)
+        if p is not None:
             texts[name] = p.read_text(encoding="utf-8")
         else:
             print(f"[warn] 缺少文档: {name}")
@@ -182,25 +182,56 @@ def _ts_type_names(text: str) -> set[str]:
     return set(re.findall(r"export\s+(?:interface|type)\s+(\w+)", text))
 
 
+def _ts_schema_names(text: str) -> set[str]:
+    """提取 openapi-typescript 生成物 components.schemas 内的嵌套类型名。"""
+    return set(re.findall(r"^ {8}(\w+): \{", text, re.MULTILINE))
+
+
 def r7_doc_types(texts: dict[str, str]) -> set[str]:
     src = texts.get("02_API接口契约.md", "")
     return _ts_type_names(section(src, "## 7.", "## 8."))
 
 
-def r7_fe_types(frontend: Path) -> set[str] | None:
-    p = frontend / "src" / "types" / "api.ts"
-    if not p.exists():
+def r7_fe_types(frontend: Path) -> tuple[set[str], set[str]] | None:
+    """前端类型全集 = api.ts 生成物 + index.ts 镜像（J25：生成物禁手改，
+    02 §7 中不经 OpenAPI 的 Agent 面类型落镜像文件）。
+
+    Returns:
+        (全集, 生成物名称集)；前端类型文件不存在时返回 None。
+        生成物脚手架导出（components/operations/paths/webhooks）不参与比对。
+    """
+    generated: set[str] = set()
+    mirror: set[str] = set()
+    p_api = frontend / "src" / "types" / "api.ts"
+    p_idx = frontend / "src" / "types" / "index.ts"
+    if p_api.exists():
+        api_txt = p_api.read_text(encoding="utf-8")
+        generated = _ts_type_names(api_txt) | _ts_schema_names(api_txt)
+    if p_idx.exists():
+        mirror = _ts_type_names(p_idx.read_text(encoding="utf-8"))
+    if not p_api.exists() and not p_idx.exists():
         return None
-    return _ts_type_names(p.read_text(encoding="utf-8"))
+    scaffolding = {"components", "operations", "paths", "webhooks", "Schemas"}
+    return (generated | mirror) - scaffolding, generated - scaffolding
 
 
-def r7_check(doc_types: set[str], fe_types: set[str] | None) -> list[tuple[str, str]]:
+def r7_check(
+    doc_types: set[str],
+    fe_types: set[str] | None,
+    generated: set[str] | None = None,
+) -> list[tuple[str, str]]:
+    """双向比对；生成物中已存在的名称（含去下划线归一化派生，如
+    Paged_SessionMessage_ → PagedSessionMessage）视为合法，不算私加。"""
     if fe_types is None:
         return []
+    gen = generated or set()
+    gen_norm = {n.replace("_", "").lower() for n in gen}
     problems: list[tuple[str, str]] = []
     for t in sorted(doc_types - fe_types):
         problems.append(("missing_in_frontend", t))
-    for t in sorted(fe_types - doc_types):
+    for t in sorted(fe_types - doc_types - gen):
+        if t.replace("_", "").lower() in gen_norm:
+            continue
         problems.append(("not_in_doc", t))
     return problems
 
@@ -231,6 +262,49 @@ def r8_check(nodes: set[str], handled: set[str] | None) -> list[str]:
     if handled is None:
         return []
     return sorted(nodes - handled)
+
+
+# ---------- R4 · BUI 设计系统依赖黑名单（J24，08 §2 R4） ----------
+R4_BANNED_IMPORTS = [
+    "@central-icons-react",
+    "iconoir-react",
+    "posthog-js",
+    "glimm",
+    "liveline",
+    "@/components/primitives/GlideMenu",
+    "@/components/atoms/Button",
+    "@/components/atoms/Shimmer",
+    "@/components/atoms/StreamText",
+]
+R4_COLOR_PAT = re.compile(r"(#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\()")
+
+
+def r4_check(frontend: Path) -> list[tuple[str, str]] | None:
+    """扫描 bui/ 组件的 banned 依赖导入与硬编码颜色。
+
+    豁免：color-mix(...) 调色与 dark: 变体（08 §2 R4）。
+
+    Returns:
+        问题列表；bui/ 目录不存在时返回 None（软跳过）。
+    """
+    bui = frontend / "src" / "components" / "bui"
+    if not bui.exists():
+        return None
+    problems: list[tuple[str, str]] = []
+    for f in bui.rglob("*"):
+        if f.suffix not in {".tsx", ".ts", ".jsx", ".js"}:
+            continue
+        txt = f.read_text(encoding="utf-8")
+        rel = str(f.relative_to(frontend))
+        for banned in R4_BANNED_IMPORTS:
+            if banned in txt:
+                problems.append((rel, f"banned 依赖: {banned}"))
+        for i, ln in enumerate(txt.splitlines(), 1):
+            if "color-mix(" in ln or "dark:" in ln:
+                continue
+            if R4_COLOR_PAT.search(ln):
+                problems.append((rel, f"L{i} 硬编码颜色: {ln.strip()[:48]}"))
+    return problems
 
 
 def main() -> int:
@@ -289,12 +363,13 @@ def main() -> int:
     elif frontend is not None:
         print("== R7: 02 §7 <-> types/api.ts 类型镜像 ==")
         d7 = r7_doc_types(texts)
-        f7 = r7_fe_types(frontend)
-        if f7 is None:
+        fe7 = r7_fe_types(frontend)
+        if fe7 is None:
             print("   [warn] 未找到 src/types/api.ts，R7 跳过")
             r7 = []
         else:
-            r7 = r7_check(d7, f7)
+            all7, gen7 = fe7
+            r7 = r7_check(d7, all7, gen7)
             for kind, t in r7:
                 print(f"   [FAIL] R7 {kind}: 类型 `{t}`")
             if not r7:
@@ -315,7 +390,23 @@ def main() -> int:
         print("== R7/R8: 跳过（未指定 --frontend）==")
         r7, r8 = [], []
 
-    hard = len(r1) + len(r2) + len(r1r) + len(r7) + len(r8)
+    # R4 · BUI 依赖黑名单（J24）
+    print("== R4: BUI 设计系统依赖黑名单（J24）==")
+    r4: list[tuple[str, str]] = []
+    if frontend is not None and frontend.exists():
+        res = r4_check(frontend)
+        if res is None:
+            print("   [warn] src/components/bui 不存在，R4 跳过")
+        else:
+            r4 = res
+            for fname, issue in r4:
+                print(f"   [FAIL] R4 {fname}: {issue}")
+            if not r4:
+                print("   [ok] bui/ 无 banned 依赖与硬编码颜色")
+    else:
+        print("   [warn] 未指定 --frontend，R4 跳过")
+
+    hard = len(r1) + len(r2) + len(r1r) + len(r7) + len(r8) + len(r4)
     print(f"\n结果: 硬错误 {hard} 处, 软警告 {len(r3)} 处")
     return 1 if hard else 0
 

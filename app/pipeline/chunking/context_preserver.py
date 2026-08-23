@@ -1,80 +1,69 @@
 """
-上下文保留策略。
+上下文保留策略（架构 P4 上下文保留 · 单元 2.1）。
 
-为切分后的文档块注入上下文信息，包括：
-- 标题路径前缀注入
-- 父子文档引用关系
+为切分后的文档块注入上下文信息：
+- 标题路径前缀注入（prefix_injection）：块内容头部拼接 title_path；
+- 父子文档引用（parent_ref）：metadata 记录父文档 ID，检索时可回溯。
+
+注意：position 定位始终指向原文档区间；前缀注入仅扩充 content，
+不修改 position（检索命中后可按偏移回原文定位）。
 """
 
-# --- 标准库 ---
-from typing import Any
-
 # --- 本地模块 ---
-from app.pipeline.base import Chunk
+from app.core.models import Chunk
 
 
 class ContextPreserver:
     """上下文保留策略。
 
-    切分后的文档块可能丢失原始上下文（如所属标题、父文档信息），
-    本类提供方法将这些上下文注入到 chunk 中，提升检索和生成质量。
-
-    主要功能：
-    - ``inject_title_path``：将标题路径作为前缀注入 chunk 内容。
-    - ``add_parent_ref``：为 chunk 添加父文档引用。
+    Attributes:
+        title_prefix_template: 标题路径前缀模板，
+            ``{title_path}`` 占位符会被 " > " 连接的路径替换。
     """
 
-    def __init__(
-        self,
-        title_prefix_template: str = "[{title_path}]\n",
-    ) -> None:
+    def __init__(self, title_prefix_template: str = "[{title_path}]\n") -> None:
         """初始化 ContextPreserver。
 
         Args:
-            title_prefix_template: 标题路径前缀模板，
-                ``{title_path}`` 占位符会被实际路径替换。
+            title_prefix_template: 前缀模板（含 {title_path} 占位符）。
         """
         self.title_prefix_template = title_prefix_template
 
-    def inject_title_path(
-        self,
-        chunks: list[Chunk],
-    ) -> list[Chunk]:
+    def inject_title_path(self, chunks: list[Chunk]) -> list[Chunk]:
         """为每个 chunk 的内容前缀注入标题路径。
 
-        例如，chunk 的 title_path 为 ``"清蒸鲈鱼 > 操作步骤"``，
-        则其 content 前缀变为 ``"[清蒸鲈鱼 > 操作步骤]\\n..."``。
+        例：title_path=["清蒸鲈鱼","操作步骤"] 的块，content 前缀变为
+        ``[清蒸鲈鱼 > 操作步骤]\\n``。空 title_path 的块不注入。
 
         Args:
             chunks: 待处理的 chunk 列表。
 
         Returns:
-            标题路径已注入的 chunk 列表。
+            标题路径已注入的 chunk 列表（新对象，不改动入参）。
         """
-        # TODO: 1. 遍历 chunks
-        # TODO: 2. 若 chunk.title_path 非空，拼接前缀到 content
-        # TODO: 3. 返回更新后的 chunk 列表
-        raise NotImplementedError
+        result: list[Chunk] = []
+        for chunk in chunks:
+            if not chunk.title_path:
+                result.append(chunk)
+                continue
+            prefix = self.title_prefix_template.format(
+                title_path=" > ".join(chunk.title_path)
+            )
+            result.append(chunk.model_copy(update={"content": prefix + chunk.content}))
+        return result
 
-    def add_parent_ref(
-        self,
-        chunks: list[Chunk],
-        parent_id: str,
-    ) -> list[Chunk]:
-        """为每个 chunk 添加父文档引用。
-
-        在 chunk 的 parent_ref 字段中记录父文档 ID，
-        便于检索时回溯原始文档上下文。
+    def add_parent_ref(self, chunks: list[Chunk], parent_id: str) -> list[Chunk]:
+        """为每个 chunk 的 metadata 添加父文档引用。
 
         Args:
             chunks: 待处理的 chunk 列表。
-            parent_id: 父文档的唯一标识（如文档哈希或路径）。
+            parent_id: 父文档唯一标识（doc_id）。
 
         Returns:
-            父引用已注入的 chunk 列表。
+            metadata 含 parent_ref 的 chunk 列表（新对象）。
         """
-        # TODO: 1. 遍历 chunks
-        # TODO: 2. 设置 chunk.parent_ref = parent_id
-        # TODO: 3. 在 metadata 中记录 parent_id
-        # TODO: 4. 返回更新后的 chunk 列表
-        raise NotImplementedError
+        result: list[Chunk] = []
+        for chunk in chunks:
+            metadata = {**chunk.metadata, "parent_ref": parent_id}
+            result.append(chunk.model_copy(update={"metadata": metadata}))
+        return result

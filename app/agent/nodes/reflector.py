@@ -4,11 +4,14 @@
 评估已有信息是否充分，决定是否需要继续检索。
 """
 
+# --- 标准库 ---
+from typing import Any
+
 # --- 本地模块 ---
 from app.agent.state import AgentState
 
 
-async def reflector_node(state: AgentState) -> dict:
+async def reflector_node(state: AgentState) -> dict[str, Any]:
     """反思节点：评估检索结果的充分性。
 
     使用轻量 LLM（如 Qwen2.5-7B）判断当前已收集的证据

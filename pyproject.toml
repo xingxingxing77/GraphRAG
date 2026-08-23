@@ -16,6 +16,7 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
     "sse-starlette>=2.0.0",
+    "python-multipart>=0.0.9",
     # 向量数据库
     "qdrant-client==1.19.0",
     # 全文检索 (J5/J6 ES 协同)
@@ -56,8 +57,21 @@ pipeline = [
     "datasketch>=1.6",
     "igraph>=0.11",
     "leidenalg>=0.10",
+    "lxml>=5.0",
+    "pypdf>=4.0",
 ]
 # 自托管可观测备选 (第10层: LangSmith 二选一, 本机已有 v4 镜像)
 observability-langfuse = [
     "langfuse>=3.0.0",
 ]
+# 开发/测试工具
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "mypy>=1.10",
+    "types-PyYAML>=6.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

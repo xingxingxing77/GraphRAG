@@ -138,7 +138,8 @@ services:
     restart: unless-stopped
 
   # --- Ollama (可选 Profile B): 宿主机原生安装, 不在此容器化 ---
-  # 启动方式(宿主机): ollama serve && ollama pull qwen2.5:7b
+  # 启动方式(宿主机): ollama serve && ollama pull qcwind/qwen2.5-7B-instruct-Q4_K_M
+  # 模型名须与 config/models.yaml local-qwen7b.model 精确一致
   # 容器内访问地址: http://host.docker.internal:11434 (见 config/models.yaml local-qwen7b)
 
 volumes:

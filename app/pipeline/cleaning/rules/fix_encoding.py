@@ -1,10 +1,9 @@
 """
-修复编码异常规则。
+修复编码异常规则（架构 P3 · 单元 1.3）。
 
-检测并修复文档中的编码问题，包括：
-- 替换 Unicode 替换字符（U+FFFD）
-- 移除不可见控制字符
-- 修复常见 Mojibake（乱码）模式
+移除 U+FFFD 替换字符与不可见控制字符；对 Mojibake 尝试按
+encoding_chain（utf-8 → utf-8-sig → gbk → latin-1）回译修复
+（cleaning_rules.yaml priority 4）。
 """
 
 # --- 标准库 ---
@@ -13,9 +12,8 @@ import unicodedata
 from typing import Any
 
 # --- 本地模块 ---
-from app.pipeline.base import ParsedDocument
+from app.core.models import CleanedDocument
 from app.pipeline.cleaning.rules.base_rule import CleaningRule
-
 
 # Unicode 替换字符
 _REPLACEMENT_CHAR: str = "\ufffd"
@@ -25,14 +23,15 @@ _CONTROL_CHAR_PATTERN: re.Pattern[str] = re.compile(
     r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]"
 )
 
+# 默认编码回译链（与采集层一致）
+_DEFAULT_ENCODING_CHAIN: tuple[str, ...] = ("utf-8", "utf-8-sig", "gbk", "latin-1")
+
+# Mojibake 高频特征字符（latin-1 误解码产物）
+_MOJIBAKE_MARKERS = ("Ã", "â€", "æ", "ç", "è", "é")
+
 
 class FixEncodingRule(CleaningRule):
     """修复编码异常规则。
-
-    处理文档中常见的编码问题：
-    - 移除 Unicode 替换字符（U+FFFD，表示解码失败）。
-    - 移除不可见控制字符（保留 \\n、\\r、\\t）。
-    - 尝试修复 Mojibake（如 ``Ã©`` → ``é``）。
 
     Attributes:
         name: 规则名称 "FixEncoding"。
@@ -44,28 +43,51 @@ class FixEncodingRule(CleaningRule):
 
     async def process(
         self,
-        doc: ParsedDocument,
+        doc: CleanedDocument,
         config: dict[str, Any],
-    ) -> ParsedDocument:
+    ) -> CleanedDocument:
         """修复文档中的编码异常字符。
 
-        处理步骤：
-        1. 替换 Unicode 替换字符为空字符串。
-        2. 移除控制字符（保留常用空白符）。
-        3. 可选：使用 ftfy 库修复 Mojibake。
-        4. 使用 NFC 标准化 Unicode 文本。
-
         Args:
-            doc: 待处理的解析后文档。
-            config: 运行时配置参数，支持 key:
-                - ``use_ftfy``: 是否使用 ftfy 修复乱码（默认 True）。
+            doc: 待处理文档。
+            config: 支持 key ``encoding_chain``（回译编码链列表）。
 
         Returns:
             编码异常被修复后的文档。
         """
-        # TODO: 1. 替换 REPLACEMENT_CHAR
-        # TODO: 2. re.sub 移除控制字符
-        # TODO: 3. 若 config['use_ftfy'] 为 True，调用 ftfy.fix_text
-        # TODO: 4. unicodedata.normalize('NFC', text)
-        # TODO: 5. 返回更新后的 ParsedDocument
-        raise NotImplementedError
+        text = doc.text.replace(_REPLACEMENT_CHAR, "")
+        text = _CONTROL_CHAR_PATTERN.sub("", text)
+        text = self._try_repair_mojibake(
+            text, tuple(config.get("encoding_chain") or _DEFAULT_ENCODING_CHAIN)
+        )
+        text = unicodedata.normalize("NFC", text)
+        return doc.model_copy(update={"text": text})
+
+    @staticmethod
+    def _try_repair_mojibake(text: str, chain: tuple[str, ...]) -> str:
+        """尝试将 Mojibake 文本回译为正确编码。
+
+        仅当文本含典型乱码特征时才尝试；回译失败保持原文。
+
+        Args:
+            text: 待修复文本。
+            chain: 编码回译链。
+
+        Returns:
+            修复后的文本（不可修复时返回原文）。
+        """
+        if not any(marker in text for marker in _MOJIBAKE_MARKERS):
+            return text
+        try:
+            raw = text.encode("latin-1")
+        except UnicodeEncodeError:
+            return text
+        for enc in chain:
+            try:
+                repaired = raw.decode(enc)
+                # 修复后不再含乱码特征才采纳
+                if not any(marker in repaired for marker in _MOJIBAKE_MARKERS):
+                    return repaired
+            except (UnicodeDecodeError, LookupError):
+                continue
+        return text

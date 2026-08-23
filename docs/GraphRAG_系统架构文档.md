@@ -1198,10 +1198,10 @@ models:
     base_url: https://api.openai.com/v1
     api_key_ref: OPENAI_API_KEY
     model: gpt-4o
-  local-qwen7b:             # 自建端点同样是普通条目
+  local-qwen7b:             # 自建端点同样是普通条目; model 须与 Ollama 实际 tag 一致
     base_url: http://localhost:11434/v1
     api_key_ref: LOCAL_KEY
-    model: qwen2.5:7b
+    model: qcwind/qwen2.5-7B-instruct-Q4_K_M
 
 roles:                      # J2: 各角色默认条目, 请求参数可覆盖
   query_understanding: local-qwen7b

@@ -42,7 +42,7 @@ edge_types:
 # --- 实体对齐 (P7-G2) ---
 alignment:
   vector_merge_threshold: 0.92      # >= 阈值且类型相同 -> 自动归并
-  manual_review_band: [0.80, 0.92)  # 灰区 -> 人工审核队列
+  manual_review_band: [0.80, 0.92]  # 灰区 [0.80, 0.92)（下界含、上界不含）-> 人工审核队列
 
 # --- 开放区规则 (J12) ---
 open_zone:

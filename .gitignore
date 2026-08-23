@@ -21,6 +21,12 @@ build/
 .ruff_cache/
 .pytest_cache/
 
-# === 前端 (预留) ===
+# === 运行时数据（采集清单等，不入库） ===
+data/
+
+# === 前端 (rag-web) ===
 node_modules/
 frontend/dist/
+rag-web/dist/
+rag-web/openapi.json
+rag-web/.env.local

@@ -1,8 +1,8 @@
 # GraphRAG 开发文档套件 · 导航
 
 > **版本**: v1.0 | **日期**: 2026-08-23
-> **设计基准**: 《GraphRAG 系统架构文档 v3.0》（`.qoder/specs/GraphRAG_系统架构文档.md`；历史演进存档 `GraphRAG_架构深度优化_task-c57.md` v2.2）
-> **Agent 协作**: 编码 Agent 一律从本目录 `AGENT.md` 开始工作。
+> **设计基准**: 《GraphRAG 系统架构文档 v3.0》（`GraphRAG_系统架构文档.md`；历史演进存档 `GraphRAG_架构深度优化_task-c57.md` v2.2）
+> **Agent 协作**: 编码 Agent 一律从**仓库根目录** `AGENT.md` 开始工作。
 
 [![doc-consistency](https://github.com/xingxingxing77/GraphRAG/actions/workflows/doc-lint.yml/badge.svg)](https://github.com/xingxingxing77/GraphRAG/actions/workflows/doc-lint.yml)
 
@@ -12,7 +12,7 @@
 
 | 文件 | 受众 | 内容一句话 |
 |------|------|-----------|
-| [AGENT.md](AGENT.md) | 编程 Agent | 开发入口：任务路由 + 硬性约束 + Playbook |
+| [AGENT.md](../AGENT.md) | 编程 Agent | 开发入口：任务路由 + 硬性约束 + Playbook |
 | [01_开发流程.md](01_开发流程.md) | 全员 | 角色/Git/CI-CD/里程碑 DoD/配置变更/缺陷管理 |
 | [02_API接口契约.md](02_API接口契约.md) | 后端 / 前端 | ★ 接口唯一权威定义：双服务端点详设、错误码、TS 类型 |
 | [03_通信协议规范.md](03_通信协议规范.md) | 后端 / 前端 | JWT/SSE 帧格式与事件语义/打字机时序/降级信号/HITL 预留 |
@@ -24,11 +24,12 @@
 | [08_文档一致性Lint规范.md](08_文档一致性Lint规范.md) | 后端 / CI | 文档漂移自动校验（X-Degraded 枚举/错误码/ADR 编号/BUI 依赖），CI 硬墙 |
 | [09_Agent派发与契约保障.md](09_Agent派发与契约保障.md) | 派发者 / 后端 Agent | 派发包模板/检查单/收工自检/契约测试矩阵/联调就绪清单（J25 配套） |
 | [10_部署运维Runbook.md](10_部署运维Runbook.md) | 运维 / SRE | D9 部署拓扑、环境变量、健康检查、备份恢复、降级 SOP、监控告警 |
+| [11_数据库与缓存实施路线图.md](11_数据库与缓存实施路线图.md) | 后端 / DBA | 缓存失效与异步写机制、D4–D9 决策、Qdrant alias 重建、Phase 0–5 实施路线（命名以 04 为准） |
 
 ## 按角色阅读路径
 
 ```
-后端   : AGENT.md → 01 → 05 → 04 → 02 → 03 → 07 → 08 → 09
+后端   : AGENT.md → 01 → 05 → 04 → 02 → 03 → 07 → 08 → 09 → 10 → 11
 前端   : AGENT.md → 01 → 06 → 02 → 03 → 07
 DBA    : AGENT.md → 04 → 07
 测试   : AGENT.md → 02 → 03 → 07 → 01

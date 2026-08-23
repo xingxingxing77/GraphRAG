@@ -46,14 +46,21 @@ class ContentDeduplicator:
     def filter_duplicates(
         self,
         items: list[tuple[str, bytes]],
-    ) -> list[tuple[str, bytes]]:
-        """过滤重复项。
+    ) -> tuple[list[tuple[str, bytes]], int]:
+        """过滤重复项（架构 P1 内容去重）。
 
         Args:
             items: (路径, 内容) 元组列表。
 
         Returns:
-            去重后的列表。
+            (去重后的列表, 被拦截的重复数)。
         """
-        # TODO: 计算哈希并过滤重复
-        raise NotImplementedError
+        kept: list[tuple[str, bytes]] = []
+        deduped = 0
+        for path, content in items:
+            digest = self.compute_hash(content)
+            if self.is_duplicate(digest):
+                deduped += 1
+                continue
+            kept.append((path, content))
+        return kept, deduped

@@ -4,11 +4,14 @@
 基于检索证据生成最终回答。
 """
 
+# --- 标准库 ---
+from typing import Any
+
 # --- 本地模块 ---
 from app.agent.state import AgentState
 
 
-async def generator_node(state: AgentState) -> dict:
+async def generator_node(state: AgentState) -> dict[str, Any]:
     """生成节点：基于证据生成答案。
 
     使用主 LLM 和检索到的证据生成最终回答，

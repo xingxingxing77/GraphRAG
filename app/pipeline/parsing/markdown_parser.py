@@ -1,23 +1,20 @@
 """
-Markdown 解析器。
+Markdown 解析器（架构 P2 · 单元 1.2）。
 
-解析 Markdown 文档，保留标题层级结构和代码块完整性，
-将原始字节内容转换为结构化的 ParsedDocument。
+解析 Markdown 文档，提取 ATX 标题层级树（StructureNode 扁平序列），
+围栏代码块内的伪标题不参与结构提取；保留正文全文供后续清洗/分块。
 """
 
 # --- 标准库 ---
 import re
-from typing import Any
 
 # --- 本地模块 ---
-from app.pipeline.base import RawDocument, ParsedDocument
+from app.core.models import ParsedDocument, RawDocument, StructureNode
+from app.pipeline.ingestion.loader import decode_text
 
 
 class MarkdownParser:
     """Markdown 文档解析器。
-
-    解析 Markdown 格式的文档，提取标题层级树与正文内容，
-    保留代码块结构不被破坏。
 
     Attributes:
         header_pattern: 匹配 ATX 标题的正则表达式。
@@ -25,48 +22,70 @@ class MarkdownParser:
 
     # 匹配 ATX 标题：# ~ ###### 开头
     header_pattern: re.Pattern[str] = re.compile(
-        r"^(?P<level>#{1,6})\s+(?P<title>.+)$",
-        re.MULTILINE,
+        r"^(?P<level>#{1,6})\s+(?P<title>.+?)\s*#*\s*$"
     )
-
-    def __init__(self) -> None:
-        """初始化 MarkdownParser。"""
-        # TODO: 可按需配置扩展（如 GFM 表格、脚注等）
-        pass
 
     def parse(self, raw_doc: RawDocument) -> ParsedDocument:
         """解析 Markdown 原始文档。
 
         处理流程：
-        1. 将 raw_bytes 解码为 UTF-8 字符串。
-        2. 提取标题层级树（structure_tree）。
-        3. 保留代码块（```...```）结构不被分割。
-        4. 构建并返回 ParsedDocument。
+        1. raw_bytes 多编码容错解码。
+        2. 逐行扫描提取标题层级树（跳过围栏代码块内伪标题）。
+        3. 组装 ParsedDocument（text 保留全文，清洗交由 P3）。
 
         Args:
             raw_doc: 原始文档对象，raw_bytes 应为 Markdown 内容。
 
         Returns:
             解析后的文档对象，包含纯文本和标题结构树。
-
-        Raises:
-            UnicodeDecodeError: 字节内容无法解码为 UTF-8。
         """
-        # TODO: 1. 解码 raw_bytes → str
-        # TODO: 2. 提取标题层级树 structure_tree
-        # TODO: 3. 保护代码块边界（不在 ``` 内部切分标题）
-        # TODO: 4. 组装 ParsedDocument 并返回
-        raise NotImplementedError
+        text, encoding = decode_text(raw_doc.raw_bytes)
+        structure_tree = self._extract_structure_tree(text)
+        return ParsedDocument(
+            doc_id=raw_doc.doc_id,
+            text=text,
+            structure_tree=structure_tree,
+            format_meta={
+                "format": "markdown",
+                "encoding": encoding,
+                "line_count": text.count("\n") + 1,
+            },
+        )
 
-    def _extract_structure_tree(self, text: str) -> list[dict[str, Any]]:
-        """从 Markdown 文本中提取标题层级树。
+    def _extract_structure_tree(self, text: str) -> list[StructureNode]:
+        """从 Markdown 文本中提取标题层级树（扁平序列）。
+
+        围栏代码块（``` / ~~~）内的 # 行视为内容而非标题（伪标题防护）。
 
         Args:
             text: Markdown 纯文本。
 
         Returns:
-            标题树列表，每项格式为
-            ``{"level": int, "title": str, "children": [...]}``。
+            标题节点列表，含 level/title/start_offset（字符偏移）。
         """
-        # TODO: 使用 header_pattern 扫描并构建嵌套树结构
-        raise NotImplementedError
+        nodes: list[StructureNode] = []
+        in_fence = False
+        fence_marker = ""
+        offset = 0
+        for line in text.splitlines(keepends=True):
+            stripped = line.strip()
+            if not in_fence and (
+                stripped.startswith("```") or stripped.startswith("~~~")
+            ):
+                in_fence = True
+                fence_marker = stripped[:3]
+            elif in_fence and stripped.startswith(fence_marker):
+                in_fence = False
+                fence_marker = ""
+            elif not in_fence:
+                m = self.header_pattern.match(line.rstrip("\n"))
+                if m:
+                    nodes.append(
+                        StructureNode(
+                            level=len(m.group("level")),
+                            title=m.group("title").strip(),
+                            start_offset=offset,
+                        )
+                    )
+            offset += len(line)
+        return nodes

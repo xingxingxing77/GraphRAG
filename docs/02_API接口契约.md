@@ -396,6 +396,8 @@ const stream = client.runs.stream(threadId, "rag_agent", {
 | GRAPH_503_STORE_UNAVAILABLE | 503 | Neo4j down（no-graph 降级中） | 顶栏 DegradedBanner |
 | ADMIN_409_TASK_RUNNING | 409 | 重建任务已在执行 | 轮询 tasks 接口 |
 | SYS_500_INTERNAL | 500 | 未归类内部错误 | 通用错误页 + 反馈入口 |
+| SYS_400_VALIDATION | 400 | 通用参数校验失败（Pydantic 请求体/查询参数） | 输入有误提示 + 表单标红 |
+| SYS_404_NOT_FOUND | 404 | 路由/资源不存在（未归类到具体命名空间） | 检查路径或刷新 |
 | SYS_403_DEBUG_DISABLED | 403 | 生产环境禁用 /admin/debug/* | 隐藏调试入口 |
 | DEBUG_400_INVALID_SOURCE | 400 | debug/retrieve 的 sources 含非法枚举 | 检查取值 |
 | SYS_503_DEPENDENCY_DOWN | 503 | 关键依赖 down（/ready 失败同源） | 服务暂不可用文案 |
@@ -473,6 +475,14 @@ export interface DebugRetrieveResponse {
   fused: { result_id: string; content: string }[];
 }
 
+// 采集调试（02 §3.11，单元 1.1）
+export interface IngestionRunRequest { mode: "full" | "incremental"; source?: string | null; }
+export interface ScanRecord {
+  scan_id: string; mode: "full" | "incremental";
+  discovered: number; changed: number; deduped: number;
+  finished_at: string | null; // ISO 8601 UTC
+}
+
 export interface ApiError { code: string; message: string; detail?: unknown; }
 
 // 降级原因：与 02 §2.4 逐值对齐；前端 06 §9 Banner 文案须全覆盖
@@ -489,4 +499,4 @@ export type AgentNodeName =
 
 ---
 
-*变更记录：v1.0（2026-08-23）基于《GraphRAG 系统架构文档 v3.0》§2.2/§3.3/§3.6 创建。*
+*变更记录：v1.0（2026-08-23）基于《GraphRAG 系统架构文档 v3.0》§2.2/§3.3/§3.6 创建。v1.1（2026-08-24）§6 补登 SYS_400_VALIDATION / SYS_404_NOT_FOUND（0.6 契约冻结缺口修复，统一错误体覆盖框架层校验/404）。*
