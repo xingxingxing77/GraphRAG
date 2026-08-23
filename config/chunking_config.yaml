@@ -1,0 +1,47 @@
+# ==================================================
+# 分块策略配置
+# ==================================================
+
+chunking:
+  strategy: hierarchical         # hierarchical | fixed | semantic | recursive
+
+  # 第一级：结构分块
+  first_level:
+    type: markdown_header
+    headers_to_split_on:
+      - ["#", "h1"]
+      - ["##", "h2"]
+      - ["###", "h3"]
+      - ["####", "h4"]
+    keep_separator: true
+
+  # 第二级：字符级兜底
+  second_level:
+    type: recursive_character
+    chunk_size: 500
+    chunk_overlap: 80
+    separators:
+      - "\n\n"
+      - "\n"
+      - "。"
+      - "；"
+      - " "
+      - ""
+
+  # 第三级：语义分块（可选，成本较高）
+  third_level:
+    enabled: false
+    type: semantic
+    model: bge-m3
+    similarity_threshold: 0.5
+
+  # 约束条件
+  constraints:
+    min_chunk_size: 50
+    max_chunk_size: 1500
+
+  # 上下文保留策略
+  context_preservation:
+    prefix_injection: true       # 注入标题路径
+    parent_ref: true             # 父子引用
+    summary_attachment: false    # 摘要附加（需 LLM）

@@ -14,4 +14,5 @@ jobs:
         with:
           python-version: "3.11"
       - name: 文档一致性 Lint (X-Degraded 枚举 / 错误码 / ADR 编号)
-        run: python scripts/doc_consistency_lint.py .
+        # G:\RAG-v0 结构适配: 文档目录为 docs/
+        run: python scripts/doc_consistency_lint.py docs

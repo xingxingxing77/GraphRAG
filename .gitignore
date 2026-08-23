@@ -1,6 +1,26 @@
+# === Python ===
 __pycache__/
 *.pyc
 .venv/
 venv/
 *.egg-info/
+
+# === IDE / 系统 ===
+.idea/
 .DS_Store
+
+# === 环境与密钥 (api_key 一律走环境变量, 禁止入库) ===
+.env
+.env.*
+!.env.example
+
+# === 构建与日志 ===
+dist/
+build/
+*.log
+.ruff_cache/
+.pytest_cache/
+
+# === 前端 (预留) ===
+node_modules/
+frontend/dist/

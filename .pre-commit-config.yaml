@@ -3,7 +3,8 @@ repos:
     hooks:
       - id: doc-consistency-lint
         name: 文档一致性 Lint
-        entry: python scripts/doc_consistency_lint.py .
+        # G:\RAG-v0 结构适配: 规范文档位于 docs/ 子目录(源仓库在根目录)
+        entry: python scripts/doc_consistency_lint.py docs
         language: system
         pass_filenames: false
         always_run: true   # 跨文件一致性，必须在每次 commit 全量跑

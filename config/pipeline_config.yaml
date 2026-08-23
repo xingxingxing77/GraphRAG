@@ -1,0 +1,99 @@
+# ==================================================
+# GraphRAG 数据管道全局配置
+# ==================================================
+
+pipeline:
+  # P1 采集层
+  ingestion:
+    mode: incremental           # full | incremental
+    scan_interval: 3600         # 秒
+    dedup_by: content_hash
+    sources:
+      - type: local_file
+        path: ./menu/HowToCook
+        extensions: [".md"]
+        max_file_size: 10485760  # 10MB
+
+  # P2 解析层
+  parsing:
+    preserve_structure: true
+    supported_formats: [md, html, pdf, docx]
+
+  # P3 清洗层
+  cleaning:
+    rules:
+      - RemoveImageRefs
+      - RemoveBoilerplate
+      - NormalizeWhitespace
+      - FixEncoding
+      - NormalizePunctuation
+    quality_gate:
+      min_length: 20
+      language: zh
+      dedup_similarity_threshold: 0.9
+
+  # P4 分块层
+  chunking:
+    strategy: hierarchical       # hierarchical | fixed | semantic | recursive
+    first_level:
+      type: markdown_header
+      headers_to_split_on:
+        - ["#", "h1"]
+        - ["##", "h2"]
+        - ["###", "h3"]
+        - ["####", "h4"]
+    second_level:
+      type: recursive_character
+      chunk_size: 500
+      chunk_overlap: 80
+      separators: ["\n\n", "\n", "。", "；", " ", ""]
+    constraints:
+      min_chunk_size: 50
+      max_chunk_size: 1500
+    context_preservation:
+      prefix_injection: true
+      parent_ref: true
+
+  # P5 增强层
+  enrichment:
+    enabled: true
+    methods:
+      - keyword_extract          # 轻量：所有文档
+      - entity_extraction        # NER
+    high_value_methods:          # 重度：仅核心文档
+      - summary_generate
+      - hypothetical_questions
+    high_value_filter:
+      min_access_count: 10
+      categories: [staple, meat_dish]
+
+  # P6 索引层
+  indexing:
+    vector_store: qdrant
+    graph_store: neo4j
+    batch_size: 100
+    update_mode: incremental     # full | incremental
+    qdrant:
+      collection: graphrag_docs
+      dense_vector_size: 1024
+      distance: cosine
+      m: 16
+      ef_construct: 200
+    neo4j:
+      text_index_name: entity_fulltext
+      indexed_labels: [Entity, Recipe]
+
+# 检索配置
+retrieval:
+  mode: hybrid                   # vector_only | keyword_only | hybrid
+  top_k: 20                      # 粗排召回数
+  rerank: true
+  rerank_model: bge-reranker-v2-m3
+  rerank_top_k: 5
+  rerank_threshold: 0.3
+  fusion: rrf                    # rrf | weighted
+  weights:
+    dense: 0.4
+    sparse: 0.2
+    graph: 0.3
+    web: 0.1

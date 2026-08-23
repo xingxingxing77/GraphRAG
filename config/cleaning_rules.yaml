@@ -1,0 +1,52 @@
+# ==================================================
+# 清洗规则配置
+# ==================================================
+
+cleaning_pipeline:
+  rules:
+    - name: RemoveImageRefs
+      enabled: true
+      priority: 1
+      description: "去除 Markdown 图片引用 ![alt](path)"
+
+    - name: RemoveBoilerplate
+      enabled: true
+      priority: 2
+      description: "去除样板文本（版权声明、PR 请求等）"
+      patterns:
+        - "请提出 Issue 或 Pull request"
+        - "贡献指南"
+        - "如何贡献"
+
+    - name: NormalizeWhitespace
+      enabled: true
+      priority: 3
+      description: "合并多余空白（连续4+换行 -> 2个换行）"
+
+    - name: FixEncoding
+      enabled: true
+      priority: 4
+      description: "修复编码异常（乱码检测与修复）"
+      encoding_chain:
+        - utf-8
+        - utf-8-sig
+        - gbk
+        - latin-1
+
+    - name: NormalizePunctuation
+      enabled: true
+      priority: 5
+      description: "统一标点（全角/半角统一）"
+      target_form: "NFC"  # NFC | NFKC | NFD | NFKD
+
+  # 质量门控（始终最后执行）
+  quality_gate:
+    enabled: true
+    priority: 99
+    min_length: 20
+    language: zh
+    dedup_method: simhash      # minhash | simhash
+    dedup_threshold: 0.9
+    sensitive_patterns:
+      - "1[3-9]\\d{9}"         # 手机号
+      - "\\d{17}[\\dXx]"       # 身份证
