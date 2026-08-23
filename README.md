@@ -4,6 +4,10 @@
 > **设计基准**: 《GraphRAG 系统架构文档 v3.0》（`.qoder/specs/GraphRAG_系统架构文档.md`；历史演进存档 `GraphRAG_架构深度优化_task-c57.md` v2.2）
 > **Agent 协作**: 编码 Agent 一律从本目录 `AGENT.md` 开始工作。
 
+[![doc-consistency](https://github.com/xingxingxing77/GraphRAG/actions/workflows/doc-lint.yml/badge.svg)](https://github.com/xingxingxing77/GraphRAG/actions/workflows/doc-lint.yml)
+
+> **本地校验**：`python scripts/doc_consistency_lint.py .`（零依赖，退出码 0 = 通过；R1/R2 违规即非零）。开启 commit 前自动拦截：`pip install pre-commit && pre-commit install`。规则与门禁语义见 [`08_文档一致性Lint规范.md`](08_文档一致性Lint规范.md)。
+
 ## 文档清单
 
 | 文件 | 受众 | 内容一句话 |
