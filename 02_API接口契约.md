@@ -4,6 +4,8 @@
 > **权威声明**: 本文件是全部 HTTP 接口的**唯一权威定义源**。前端按此开发（配合 06），后端按此实现（配合 05）；其余文档只引用不重复定义。冲突时以本文件为准并回写架构文档。
 > **上游依据**: 架构文档 §3.6 REST 规范、§2.2 双服务时序；决策编号沿用其速查表。
 
+> **机器契约声明（J25）**：后端 FastAPI 导出的 `/openapi.json` 是所有接口字段、请求/响应模型、错误体的**机器真源**；本文是人读镜像。二者冲突以 OpenAPI 为准并回写本文（文档修正 PR 走 AGENT.md §4.10）。前端 `types/api.ts` 由 `openapi-typescript` 从 `/openapi.json` 生成、禁手改（见 06 §2、09 §4）。
+
 ---
 
 ## 1. 双服务边界总览
@@ -472,6 +474,17 @@ export interface DebugRetrieveResponse {
 }
 
 export interface ApiError { code: string; message: string; detail?: unknown; }
+
+// 降级原因：与 02 §2.4 逐值对齐；前端 06 §9 Banner 文案须全覆盖
+export type DegradedReason =
+  | "no-graph" | "no-rerank" | "llm-fallback" | "no-memory"
+  | "no-cache" | "budget-exhausted" | "no-persistence";
+
+// Agent 图节点名（thought 聚合源）：与 03 §3.3/§3.4 权威枚举一致；
+// 前端 summarize() 须对全部成员穷举 switch，未覆盖即 tsc 报错
+export type AgentNodeName =
+  | "load_memory" | "query_understanding" | "planner"
+  | "tool_router" | "reflector" | "generator" | "self_correction";
 ```
 
 ---

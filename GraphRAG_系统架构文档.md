@@ -63,6 +63,7 @@
 | J21 | 会话状态权威源 | LangGraph thread checkpoint（Postgres）承载 runs 与对话线程状态（SDK 原生能力）；Redis 工作记忆 + Qdrant 情景记忆退化为检索增强素材，由图内前置节点 load_memory 注入 |
 | J22 | L1 缓存短路方式 | 前端发起前先调 FastAPI 的 `POST /chat/precheck` 查询语义缓存，命中直接返回缓存答案；miss 再经 SDK 发起 run。避免 BFF 反代流式的复杂度 |
 | J23 | Postgres 故障降级 | checkpoint 不可用时 langgraph-server 切换内存态 ephemeral store，run 仍可完成并交付答案，标记 `no-persistence`；业务面会话类端点降级；`/ready` 不因 Postgres 单点返回 503（与 Redis 同列非阻断），保证"降级不抛错"哲学对会话状态权威源（J21）同样成立（补全 D5 矩阵盲区） |
+| J25 | 接口契约单源与 TS 代码生成 | 后端 FastAPI 导出的 `/openapi.json` 为接口字段、请求/响应模型、错误体的**机器真源**；02 为人读镜像，冲突以 OpenAPI 为准并回写 02；前端 `types/api.ts` 由 `openapi-typescript` 从 `/openapi.json` 生成、禁止手改。把"前后端联调"从人工对齐升级为代码生成 + 契约测试双保险，消除手镜像漂移（配套 AGENT.md §8、01 §6.0、06 §2、08 R5/R6） |
 | J24 | 前端设计系统 | 采用 **Beautiful UI**（beautifului.dev，MIT）作为统一设计系统层，组件源码复制至 `rag-web/src/components/bui/`（非 npm 包）；shadcn/ui 保留为基础原子层。设计令牌集中重建于 `globals.css`（Tailwind v4 `@theme` + `.dark` 覆盖），暗色沿用 `class="dark"`。外部/私有依赖按规则替换：`@central-icons-react` 与 `iconoir-react` → `lucide-react`；`posthog-js`/`glimm` 剥离；`liveline` → `recharts`；内部无源码依赖 `Button`/`Shimmer`/`StreamText` 本地化，`GlideMenu` → shadcn `Popover`/`DropdownMenu`。详见 06「设计系统：Beautiful UI」章与 `前端设计系统落地方案.md` |
 
 ### G. 其他决策系列速查
