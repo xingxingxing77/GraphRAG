@@ -79,6 +79,12 @@ export default function ChatPage() {
                   <span className="inline-block max-w-[80%] rounded-2xl border border-neutral-200 px-3.5 py-2 text-left text-sm dark:border-neutral-700">
                     {m.content}
                   </span>
+                  {/* 消息气泡 latency_tier 徽章（6.2：实际执行档位） */}
+                  {m.role === "assistant" && m.latencyTier ? (
+                    <span className="ml-2 inline-block rounded-full bg-neutral-100 px-2 py-0.5 align-middle text-[10px] text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+                      {m.latencyTier}
+                    </span>
+                  ) : null}
                 </div>
               ))}
             </div>

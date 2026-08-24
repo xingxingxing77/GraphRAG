@@ -364,7 +364,7 @@ const stream = client.runs.stream(threadId, "rag_agent", {
 | 类型 | 字段 | 说明 |
 |------|------|------|
 | ChatRunInput | `original_query: string`(必填, ≤2000字) · `session_id: string` · `user_id: string` | run 入参 |
-| RunConfig | `configurable.latency_tier: "auto"\|"fast"\|"standard"\|"deep"` · `configurable.model: string\|null` | auto 由意图路由定档（D4） |
+| RunConfig | `configurable.latency_tier: "auto"\|"fast"\|"standard"\|"deep"` · `configurable.model: string\|null` | auto 由意图路由定档（D4）：run 入口透传，query_understanding 节点定档并回写实际档位（架构 2.4） |
 | Citation | `marker: int` · `result_ids: string[]` · `quote: string\|null` | 引用标注（架构 3.3） |
 | AssistantMessage | `message_id` · `content` · `citations[]` · `degraded: bool` · `latency_tier` · `model` · `created_at` | 03 §4 终态事件的载荷同构 |
 | SubgraphResponse | `nodes[{id,label,type,zone}]` · `relationships[{source,target,type}]` | NVL 直连格式 |
@@ -499,4 +499,4 @@ export type AgentNodeName =
 
 ---
 
-*变更记录：v1.0（2026-08-23）基于《GraphRAG 系统架构文档 v3.0》§2.2/§3.3/§3.6 创建。v1.1（2026-08-24）§6 补登 SYS_400_VALIDATION / SYS_404_NOT_FOUND（0.6 契约冻结缺口修复，统一错误体覆盖框架层校验/404）。*
+*变更记录：v1.0（2026-08-23）基于《GraphRAG 系统架构文档 v3.0》§2.2/§3.3/§3.6 创建。v1.1（2026-08-24）§6 补登 SYS_400_VALIDATION / SYS_404_NOT_FOUND（0.6 契约冻结缺口修复，统一错误体覆盖框架层校验/404）。v1.2（2026-08-24）§5 RunConfig 补 auto 解析点说明（query_understanding 节点定档回写，架构 2.4 v3.1 裁决）；无字段/错误码变更。*

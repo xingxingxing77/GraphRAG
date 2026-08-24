@@ -30,6 +30,7 @@ MYPY_TARGETS = [
     "app/core",
     "app/llm",
     "app/agent",
+    "app/query",
     "app/api/errors.py",
     "app/pipeline/config.py",
     "app/pipeline/ingestion",

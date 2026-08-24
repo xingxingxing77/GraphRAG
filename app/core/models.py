@@ -34,11 +34,16 @@ class SourceKind(str, Enum):
 
 
 class IntentType(str, Enum):
-    """查询意图类型（第 2 层查询理解 M2 产出，fast 路径判定依据）。"""
+    """查询意图类型（第 2 层查询理解 M2 产出，fast 路径判定依据）。
 
-    FACT = "fact"
+    枚举值以架构文档 L2 Schema 为唯一权威（v3.1 裁决，D1 同名同义）；
+    global_summary 触发 global 检索路（社区摘要），禁止缺漏。
+    """
+
+    FACTOID = "factoid"
     MULTI_HOP = "multi_hop"
     COMPARISON = "comparison"
+    GLOBAL_SUMMARY = "global_summary"
     CHITCHAT = "chitchat"
 
 
@@ -48,6 +53,28 @@ class LatencyTier(str, Enum):
     FAST = "fast"
     STANDARD = "standard"
     DEEP = "deep"
+
+
+class QueryUnderstandingResult(BaseModel):
+    """M2 单次结构化调用产出（架构 L2 Schema v3.1，四字段）。
+
+    complexity 已废弃（v3.1 裁决）；standard→deep 升级依据
+    Rerank 置信度（见 resolve/should_upgrade 工具函数）。
+    entities 复用 P5 EntityMention（D1 单源，span/normalized_to 缺省）。
+
+    Attributes:
+        intent: 意图（IntentType 五值）。
+        rewritten_query: 改写后的主查询（失败兜底为原始查询）。
+        subqueries: 子问题列表（deep 档子查询分解产出）。
+        entities: 实体提及列表。
+        rule_short_circuit: 是否 chitchat 规则前置命中（未调 LLM）。
+    """
+
+    intent: IntentType = IntentType.FACTOID
+    rewritten_query: str = ""
+    subqueries: list[str] = Field(default_factory=list)
+    entities: list["EntityMention"] = Field(default_factory=list)
+    rule_short_circuit: bool = False
 
 
 # ============================================================
@@ -1107,3 +1134,4 @@ class EmbedProbeResponse(BaseModel):
 
 # 前向引用模型重建（RetrievalResult 定义于后，需延迟解析）
 DebugRetrieveResponse.model_rebuild()
+QueryUnderstandingResult.model_rebuild()

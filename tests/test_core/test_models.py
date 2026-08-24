@@ -202,9 +202,10 @@ class TestApiContracts:
 
     def test_intent_type_enum(self) -> None:
         assert {m.value for m in IntentType} == {
-            "fact",
+            "factoid",
             "multi_hop",
             "comparison",
+            "global_summary",
             "chitchat",
         }
 

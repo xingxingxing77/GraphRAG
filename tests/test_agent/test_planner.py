@@ -44,7 +44,7 @@ def _state(**overrides):  # noqa: ANN001, ANN202
     state = {
         "query": "清蒸鲈鱼怎么做？",
         "original_query": "清蒸鲈鱼怎么做？",
-        "intent": IntentType.FACT,
+        "intent": IntentType.FACTOID,
         "plan": [],
         "reflect_feedback": None,
         "token_usage": [],

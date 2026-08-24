@@ -99,6 +99,29 @@ retrieval:
     graph: 0.3
     web: 0.1
 
+# 查询理解层（架构 L2 v3.1）：chitchat 规则前置（J18 热更）
+query_understanding:
+  chitchat_rules:
+    max_length: 12             # 超过此长度的查询不走规则短路
+    greeting_words:            # 问候语表命中即 chitchat
+      - "你好"
+      - "您好"
+      - "hello"
+      - "hi"
+      - "嗨"
+      - "在吗"
+      - "谢谢"
+      - "再见"
+    question_words:            # 含疑问词视为实义查询，不短路
+      - "怎么做"
+      - "如何"
+      - "为什么"
+      - "是什么"
+      - "哪个"
+      - "多少"
+      - "做法"
+      - "步骤"
+
 # Agent 第 6 层 A/B/E 系列优化项（架构 8.2）
 agent:
   parallel_fanout: deep_only   # A1: deep 档无依赖子步骤并行扇出

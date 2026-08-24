@@ -8,25 +8,31 @@
 from app.agent.graph import RECURSION_LIMIT, build_agent_graph
 from app.agent.routers import (
     NODE_GENERATOR,
+    NODE_LOAD_MEMORY,
     NODE_PLANNER,
+    NODE_QUERY_UNDERSTANDING,
     NODE_REFLECTOR,
     NODE_SELF_CORRECTION,
     NODE_TOOL_ROUTER,
+    NODE_WRITE_BACK,
 )
 
 
 class TestGraphStructure:
     """图注册与可达性（准出：全部条件边路径可达且有测试）。"""
 
-    def test_compiles_with_five_nodes(self) -> None:
+    def test_compiles_with_all_nodes(self) -> None:
         graph = build_agent_graph()
         node_names = set(graph.get_graph().nodes.keys())
         for expected in (
+            NODE_LOAD_MEMORY,
+            NODE_QUERY_UNDERSTANDING,
             NODE_PLANNER,
             NODE_TOOL_ROUTER,
             NODE_REFLECTOR,
             NODE_GENERATOR,
             NODE_SELF_CORRECTION,
+            NODE_WRITE_BACK,
         ):
             assert expected in node_names
 
@@ -42,11 +48,14 @@ class TestGraphStructure:
                     reachable.add(edge.target)
                     stack.append(edge.target)
         for expected in (
+            NODE_LOAD_MEMORY,
+            NODE_QUERY_UNDERSTANDING,
             NODE_PLANNER,
             NODE_TOOL_ROUTER,
             NODE_REFLECTOR,
             NODE_GENERATOR,
             NODE_SELF_CORRECTION,
+            NODE_WRITE_BACK,
         ):
             assert expected in reachable, f"{expected} 从 START 不可达"
 

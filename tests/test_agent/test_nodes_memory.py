@@ -164,9 +164,11 @@ class TestGraphTopology:
         assert NODE_WRITE_BACK in nodes
 
     def test_injection_point_before_planner(self) -> None:
+        """注入在改写前（04 §4/J17）：load_memory → query_understanding → planner。"""
         graph = build_agent_graph()
         edges = {
             (e.source, e.target) for e in graph.get_graph().edges
         }
         assert ("__start__", NODE_LOAD_MEMORY) in edges
-        assert (NODE_LOAD_MEMORY, "planner") in edges
+        assert (NODE_LOAD_MEMORY, "query_understanding") in edges
+        assert ("query_understanding", "planner") in edges

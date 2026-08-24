@@ -75,6 +75,7 @@ REFLECT_SKIP_THRESHOLD, EVIDENCE_ENOUGH_COUNT = _load_reflect_cfg()
 _A2_TOP_K = 5
 
 # 图节点名常量（graph.py 注册同名节点）
+NODE_QUERY_UNDERSTANDING = "query_understanding"
 NODE_PLANNER = "planner"
 NODE_TOOL_ROUTER = "tool_router"
 NODE_REFLECTOR = "reflector"

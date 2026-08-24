@@ -14,6 +14,8 @@ export interface ChatMessage {
   citations?: Citation[];
   degraded?: boolean;
   cacheHit?: boolean;
+  /** 实际执行档位（auto 由 query_understanding 定档回写，架构 2.4 v3.1） */
+  latencyTier?: string;
   createdAt?: string;
 }
 
@@ -29,8 +31,8 @@ interface ChatState {
   /** 终态 answer，TypewriterText 消费后置空 */
   typewriterTarget: string | null;
   degradedReasons: DegradedReason[];
-  /** 用户选择档位，默认 standard */
-  activeTier: "fast" | "standard" | "deep";
+  /** 用户选择档位，默认 auto（意图路由定档，D4） */
+  activeTier: "auto" | "fast" | "standard" | "deep";
   appendUserMessage(query: string): void;
   appendAssistant(msg: Omit<ChatMessage, "id" | "role">): void;
   setStreaming(v: boolean): void;
@@ -38,7 +40,7 @@ interface ChatState {
   setFinalAnswer(answer: string, citations: Citation[], reasons: DegradedReason[]): void;
   consumeTypewriter(): void;
   pushDegraded(reasons: string[]): void;
-  setActiveTier(tier: "fast" | "standard" | "deep"): void;
+  setActiveTier(tier: "auto" | "fast" | "standard" | "deep"): void;
   reset(): void;
 }
 
@@ -51,7 +53,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   thoughtSteps: [],
   typewriterTarget: null,
   degradedReasons: [],
-  activeTier: "standard",
+  activeTier: "auto",
 
   appendUserMessage(query) {
     set((s) => ({

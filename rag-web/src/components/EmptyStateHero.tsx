@@ -112,9 +112,12 @@ export function EmptyStateHero({ suggestions, onSubmit }: EmptyStateHeroProps) {
         <select
           className={CHIP_SELECT}
           value={activeTier}
-          onChange={(e) => setActiveTier(e.target.value as "fast" | "standard" | "deep")}
+          onChange={(e) =>
+            setActiveTier(e.target.value as "auto" | "fast" | "standard" | "deep")
+          }
           aria-label="响应档位"
         >
+          <option value="auto">auto（意图定档）</option>
           <option value="fast">fast</option>
           <option value="standard">standard</option>
           <option value="deep">deep</option>

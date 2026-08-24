@@ -236,7 +236,8 @@ SDK 发起 run (thread checkpoint 承载会话线程状态, J21)
 | deep | multi_hop / comparison / global_summary | HyDE 改写 + 子查询分解满配 + 反思 3 轮 + 忠实度校验 | ≤35s |
 
 - 意图路由自动选档，客户端可通过 API 参数 `latency_tier` 强制覆盖
-- `standard` 结果置信度低（如 Rerank 分数普遍低于阈值）时自动升级为 `deep` 重跑
+- `latency_tier=auto`（02 §5）由 run 入口原样透传，由 **query_understanding 节点定档后回写实际档位**（03 §3.4 updates 样例的 `latency_tier` 字段即回写值）；`AgentState.latency_tier` 仅存具体档位（fast/standard/deep，不含 auto）
+- `standard` 结果置信度低（Rerank 分数普遍低于 `rerank_threshold`）时自动升级为 `deep` 重跑；升级依据即此置信度，不依赖 complexity 字段（已废弃）
 
 ---
 
@@ -366,8 +367,8 @@ PlanStep 约定：
 |------|------|------|
 | query | str | 当前查询（改写后） |
 | original_query | str | 用户原始查询 |
-| intent | IntentType | 意图（fast 路径判定依据） |
-| latency_tier | Literal["fast","standard","deep"] | 延迟档位 |
+| intent | IntentType | 意图（fast 路径判定依据；枚举 = L2 Schema 五值，global_summary 触发 global 检索路） |
+| latency_tier | Literal["fast","standard","deep"] | 延迟档位（仅存具体档位；auto 由 query_understanding 节点定档后回写，见 2.4） |
 | plan | list[PlanStep] | 检索计划 |
 | current_step | int | 当前执行步骤 |
 | retrieved_evidence | list[RetrievalResult] | 累积证据 |
@@ -484,16 +485,22 @@ app/api/
 
 **关键决策（M2）——四组件合并为单次结构化调用**: 意图分类、改写、分解、实体抽取合并为一次 LLM 调用返回全部结果，延迟控制在 1-2s。
 
+**chitchat 规则前置短路（M2 增补，2026-08）**: 合并结构化调用前先执行零成本启发式判定（查询长度、疑问词/实义词命中、问候语表等；规则表随 `config/pipeline_config.yaml` 热更，J18），命中 chitchat 直接产出「直答」PlanStep，**跳过 LLM 理解调用**（保障 fast 档 P95 ≤6s 与 E-02 达标）；规则未命中再走 M2 单次调用。LangSmith 中规则短路路径无 query_understanding span（07 S-02 断言）。
+
 ```json
 // 单次结构化输出的目标 Schema
+// intent 枚举以此为准（代码侧 IntentType，app/core/models.py 须逐值对齐，D1）
 {
   "intent": "multi_hop | factoid | comparison | global_summary | chitchat",
   "rewritten_query": "改写后的主查询",
   "subqueries": ["子问题1", "子问题2"],
-  "entities": [{"name": "鲈鱼", "type": "食材"}],
-  "complexity": "low | medium | high"
+  "entities": [{"name": "鲈鱼", "type": "食材"}]
 }
 ```
+
+> **complexity 字段废弃（2026-08 裁决）**：原 Schema 中的 `complexity` 不再进入契约与
+> AgentState（下游无消费点）；`standard→deep` 自动升级依据改为 **Rerank 置信度**
+> （Top-K 分数普遍低于 `rerank_threshold`，见 2.4）。
 
 - 使用较小/快的模型（Qwen2.5-7B）+ JSON mode / guided decoding 保证结构化输出合法
 - HyDE 仅在 deep 档作为可选增强启用
@@ -503,11 +510,12 @@ app/api/
 **项目结构**:
 ```
 app/query/
-  router.py           # 意图分类 + 合并式结构化调用
-  rewriter.py         # HyDE / 查询改写（仅 deep 档启用）
-  decomposer.py       # 子查询分解
-  entity_extractor.py # 实体抽取（可用 LLM 或规则+NER）
+  router.py           # ★ M2 合并式结构化调用主体（唯一 LLM 调用点，query_understanding 角色）:
+                      #   chitchat 规则前置 + 意图/改写/分解/实体 一次产出
+  rewriter.py         # HyDE / 深度改写（仅 deep 档可选增强；经 registry 角色调用，不持独立客户端）
 ```
+> decomposer / entity_extractor 不再独立成类：二者的职责已并入合并式调用
+> 的输出 Schema（subqueries / entities 字段），保留独立文件会诱导多次 LLM 调用、违反 M2 延迟预算。
 
 ---
 
@@ -1700,6 +1708,12 @@ project_root/
     - **F4 图内节点适配**：新增 `load_memory` 前置节点与写入侧尾节点（工作记忆/情景记忆/precheck 缓存条目），对齐 2.2 双服务时序
 
 每个阶段的完成标准（DoD）：对应模块单元测试通过 + golden set 上该环节指标不低于基线 + LangSmith trace 可完整回放该链路。
+
+---
+
+## 变更记录
+
+- **v3.1（2026-08-24）查询理解层优化裁决**：① L2 增补 chitchat 规则前置短路（M2 增补，规则表随 pipeline_config.yaml 热更）；② L2 Schema 确认 intent 五值枚举为代码 IntentType 唯一权威（factoid/global_summary 命名对齐，D1）；③ complexity 字段废弃，standard→deep 升级依据改为 Rerank 置信度；④ 2.4/§3.4 明文 `latency_tier=auto` 解析点（query_understanding 节点定档回写，AgentState 仅存具体档位）；⑤ query/ 模块结构收敛（router.py=合并调用唯一主体，rewriter.py=deep 档 HyDE，decomposer/entity_extractor 并入删除）。配套修订 02 §5 / 05 §2·§5.1 / 01 §6.7 / 07 §5·§6。
 
 
 

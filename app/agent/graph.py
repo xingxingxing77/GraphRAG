@@ -14,6 +14,7 @@ from langgraph.graph.state import CompiledStateGraph
 from app.agent.nodes.generator import generator_node
 from app.agent.nodes.load_memory import load_memory_node
 from app.agent.nodes.planner import planner_node
+from app.agent.nodes.query_understanding import query_understanding_node
 from app.agent.nodes.reflector import reflector_node
 from app.agent.nodes.self_correction import self_correction_node
 from app.agent.nodes.tool_router import tool_router_node
@@ -22,6 +23,7 @@ from app.agent.routers import (
     NODE_GENERATOR,
     NODE_LOAD_MEMORY,
     NODE_PLANNER,
+    NODE_QUERY_UNDERSTANDING,
     NODE_REFLECTOR,
     NODE_SELF_CORRECTION,
     NODE_TOOL_ROUTER,
@@ -40,8 +42,8 @@ RECURSION_LIMIT = 15
 def build_agent_graph() -> CompiledStateGraph[AgentState]:
     """构建并编译 LangGraph Agent 状态图。
 
-    状态图流程（05 §5.3；8.1/8.3 记忆读写节点已接入）:
-        START -> load_memory -> planner -> tool_router
+    状态图流程（05 §5.3；8.1/8.3 记忆读写 + 6.1 查询理解已接入）:
+        START -> load_memory -> query_understanding -> planner -> tool_router
         tool_router -> [cond] 直答/B4 预算耗尽 -> generator
                     -> 其余 -> reflector
         reflector -> [cond needs_more_retrieval && rounds<3] -> planner(增量补计划)
@@ -59,6 +61,7 @@ def build_agent_graph() -> CompiledStateGraph[AgentState]:
 
     # --- 节点注册 ---
     graph.add_node(NODE_LOAD_MEMORY, load_memory_node)
+    graph.add_node(NODE_QUERY_UNDERSTANDING, query_understanding_node)
     graph.add_node(NODE_PLANNER, planner_node)
     graph.add_node(NODE_TOOL_ROUTER, tool_router_node)
     graph.add_node(NODE_REFLECTOR, reflector_node)
@@ -68,7 +71,9 @@ def build_agent_graph() -> CompiledStateGraph[AgentState]:
 
     # --- 边绑定 ---
     graph.add_edge(START, NODE_LOAD_MEMORY)
-    graph.add_edge(NODE_LOAD_MEMORY, NODE_PLANNER)
+    # 注入在改写前（04 §4/J17）：load_memory -> query_understanding -> planner
+    graph.add_edge(NODE_LOAD_MEMORY, NODE_QUERY_UNDERSTANDING)
+    graph.add_edge(NODE_QUERY_UNDERSTANDING, NODE_PLANNER)
     graph.add_edge(NODE_PLANNER, NODE_TOOL_ROUTER)
     # 直答单步(J9) / B4 预算耗尽 -> generator；其余 -> reflector
     graph.add_conditional_edges(

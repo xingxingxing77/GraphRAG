@@ -218,23 +218,22 @@ export interface paths {
         put?: never;
         /**
          * Chat Precheck
-         * @description L1 语义缓存短路查询（J22/H2）。
+         * @description L1 语义缓存短路查询（J22/H2，单元 8.3 S1）。
          *
-         *     查询向量 ANN 检索 Qdrant cache collection，score >= 0.95 命中：
+         *     查询向量 ANN 检索 Qdrant rag_cache，score >= 0.95 命中：
          *     - 命中返回 {hit:true, answer, citations, cache_score, matched_query}
          *     - 未命中返回 {hit:false, suggested_run}（意图启发式建议档位）
          *
-         *     缓存永不阻塞主链路：Redis/Qdrant 异常时返回 {hit:false}
-         *     并置 X-Degraded: no-cache，不报错。
+         *     缓存永不阻塞主链路：Qdrant/Embedding 异常时返回 {hit:false}
+         *     并置 X-Degraded: no-cache，不报错（07 A-11）。
          *
          *     Args:
          *         request: precheck 请求（query + session_id）。
+         *         response: FastAPI 响应（用于置 X-Degraded 头）。
+         *         cache: 语义缓存（依赖注入）。
          *
          *     Returns:
          *         PrecheckResponse: 命中/未命中两态。
-         *
-         *     Raises:
-         *         HTTPException: CHAT_400_EMPTY_QUERY（空查询由模型校验拦截）。
          */
         post: operations["chat_precheck_api_v1_chat_precheck_post"];
         delete?: never;
