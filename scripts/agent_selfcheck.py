@@ -75,6 +75,8 @@ MYPY_TARGETS = [
     "app/reranking/reranker.py",
     "app/reranking/scoring.py",
     "app/reranking/context_compressor.py",
+    "app/postprocessing",
+    "app/api/endpoints/golden.py",
 ]
 
 

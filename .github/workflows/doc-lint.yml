@@ -16,3 +16,16 @@ jobs:
       - name: 文档一致性 Lint (X-Degraded 枚举 / 错误码 / ADR 编号)
         # G:\RAG-v0 结构适配: 文档目录为 docs/
         run: python scripts/doc_consistency_lint.py docs
+
+  golden-regression:
+    # golden set 回归门禁（D8 · 单元 7.2）：Recall@5 相对基线降 >3% 阻断
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 安装依赖
+        run: pip install pyyaml
+      - name: golden set 回归（离线词法 Recall@5）
+        run: python tests/golden/run_regression.py --suite v1

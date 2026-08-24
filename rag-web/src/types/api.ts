@@ -735,6 +735,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/golden/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Golden
+         * @description 导出点踩 bad case 清单（CSV 流，golden 回流）。
+         *
+         *     Args:
+         *         since: 仅导出该时间之后的记录（可选）。
+         *
+         *     Returns:
+         *         StreamingResponse: text/csv 流。
+         */
+        get: operations["export_golden_api_v1_admin_golden_export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -2666,6 +2692,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QdrantPointsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_golden_api_v1_admin_golden_export_get: {
+        parameters: {
+            query?: {
+                /** @description ISO 时间过滤 */
+                since?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

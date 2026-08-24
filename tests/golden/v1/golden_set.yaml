@@ -1,0 +1,325 @@
+# golden set v1（D8 · 07 §8 · 单元 7.2）
+# 由 tests/golden/build_v1.py 从 menu/HowToCook 确定性生成；
+# 回归指标与阻断阈值见 run_regression.py（Recall@5 相对基线降 >3% 阻断）。
+version: v1
+entries:
+  - id: g001
+    query: "咖喱炒蟹的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/咖喱炒蟹.md"
+    category: "dishes"
+  - id: g002
+    query: "响油鳝丝的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/响油鳝丝.md"
+    category: "dishes"
+  - id: g003
+    query: "小龙虾的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/小龙虾/小龙虾.md"
+    category: "aquatic"
+  - id: g004
+    query: "干煎阿根廷红虾的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/干煎阿根廷红虾/干煎阿根廷红虾.md"
+    category: "aquatic"
+  - id: g005
+    query: "微波葱姜黑鳕鱼的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/微波葱姜黑鳕鱼.md"
+    category: "dishes"
+  - id: g006
+    query: "水煮鱼的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/水煮鱼.md"
+    category: "dishes"
+  - id: g007
+    query: "油焖大虾的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/油焖大虾/油焖大虾.md"
+    category: "aquatic"
+  - id: g008
+    query: "烤鱼的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/混合烤鱼/烤鱼.md"
+    category: "aquatic"
+  - id: g009
+    query: "清蒸生蚝的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/清蒸生蚝.md"
+    category: "dishes"
+  - id: g010
+    query: "清蒸鲈鱼的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/清蒸鲈鱼/清蒸鲈鱼.md"
+    category: "aquatic"
+  - id: g011
+    query: "白灼虾的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/白灼虾/白灼虾.md"
+    category: "aquatic"
+  - id: g012
+    query: "糖醋鲤鱼的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/糖醋鲤鱼/糖醋鲤鱼.md"
+    category: "aquatic"
+  - id: g013
+    query: "红烧鱼的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/红烧鱼.md"
+    category: "dishes"
+  - id: g014
+    query: "红烧鱼头的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/红烧鱼头.md"
+    category: "dishes"
+  - id: g015
+    query: "红烧鲤鱼的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/红烧鲤鱼.md"
+    category: "dishes"
+  - id: g016
+    query: "肉蟹煲的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/肉蟹煲.md"
+    category: "dishes"
+  - id: g017
+    query: "芥末黄油罗氏虾的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/芥末黄油罗氏虾/芥末黄油罗氏虾.md"
+    category: "aquatic"
+  - id: g018
+    query: "葱油桂鱼的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/葱油桂鱼/葱油桂鱼.md"
+    category: "aquatic"
+  - id: g019
+    query: "葱烧海参的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/葱烧海参/葱烧海参.md"
+    category: "aquatic"
+  - id: g020
+    query: "蒜蓉虾的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/蒜蓉虾/蒜蓉虾.md"
+    category: "aquatic"
+  - id: g021
+    query: "蒜香黄油虾的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/蒜香黄油虾/蒜香黄油虾.md"
+    category: "aquatic"
+  - id: g022
+    query: "蛏抱蛋的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/蛏抱蛋/蛏抱蛋.md"
+    category: "aquatic"
+  - id: g023
+    query: "酱炖蟹的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/酱炖蟹.md"
+    category: "dishes"
+  - id: g024
+    query: "阳朔啤酒鱼的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/阳朔啤酒鱼/阳朔啤酒鱼.md"
+    category: "aquatic"
+  - id: g025
+    query: "香煎翘嘴鱼的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/香煎翘嘴鱼/香煎翘嘴鱼.md"
+    category: "aquatic"
+  - id: g026
+    query: "鲤鱼炖白菜的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/鲤鱼炖白菜/鲤鱼炖白菜.md"
+    category: "aquatic"
+  - id: g027
+    query: "鳊鱼炖豆腐的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/鳊鱼炖豆腐/鳊鱼炖豆腐.md"
+    category: "aquatic"
+  - id: g028
+    query: "黄油煎虾的做法"
+    expected_doc: "menu/HowToCook/dishes/aquatic/黄油煎虾/黄油煎虾.md"
+    category: "aquatic"
+  - id: g029
+    query: "吐司果酱的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/吐司果酱.md"
+    category: "dishes"
+  - id: g030
+    query: "太阳蛋的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/太阳蛋.md"
+    category: "dishes"
+  - id: g031
+    query: "完美水煮蛋的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/完美水煮蛋.md"
+    category: "dishes"
+  - id: g032
+    query: "微波炉荷包蛋的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/微波炉荷包蛋.md"
+    category: "dishes"
+  - id: g033
+    query: "微波炉蒸蛋的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/微波炉蒸蛋.md"
+    category: "dishes"
+  - id: g034
+    query: "微波炉蛋糕的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/微波炉蛋糕.md"
+    category: "dishes"
+  - id: g035
+    query: "意式香肠北非蛋的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/意式香肠北非蛋.md"
+    category: "dishes"
+  - id: g036
+    query: "手抓饼的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/手抓饼.md"
+    category: "dishes"
+  - id: g037
+    query: "桂圆红枣粥的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/桂圆红枣粥.md"
+    category: "dishes"
+  - id: g038
+    query: "水煮玉米的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/水煮玉米.md"
+    category: "dishes"
+  - id: g039
+    query: "温泉蛋的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/温泉蛋/温泉蛋.md"
+    category: "breakfast"
+  - id: g040
+    query: "溏心蛋的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/溏心蛋.md"
+    category: "dishes"
+  - id: g041
+    query: "煎饺的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/煎饺.md"
+    category: "dishes"
+  - id: g042
+    query: "燕麦鸡蛋饼的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/燕麦鸡蛋饼.md"
+    category: "dishes"
+  - id: g043
+    query: "牛奶燕麦的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/牛奶燕麦.md"
+    category: "dishes"
+  - id: g044
+    query: "空气炸锅面包片的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/空气炸锅面包片.md"
+    category: "dishes"
+  - id: g045
+    query: "美式炒蛋的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/美式炒蛋.md"
+    category: "dishes"
+  - id: g046
+    query: "苏格兰蛋的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/苏格兰蛋/苏格兰蛋.md"
+    category: "breakfast"
+  - id: g047
+    query: "茶叶蛋的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/茶叶蛋.md"
+    category: "dishes"
+  - id: g048
+    query: "蒸水蛋的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/蒸水蛋.md"
+    category: "dishes"
+  - id: g049
+    query: "蒸花卷的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/蒸花卷.md"
+    category: "dishes"
+  - id: g050
+    query: "蛋煎糍粑的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/蛋煎糍粑.md"
+    category: "dishes"
+  - id: g051
+    query: "金枪鱼酱三明治的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/金枪鱼酱三明治.md"
+    category: "dishes"
+  - id: g052
+    query: "韩国麻药鸡蛋的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/韩国麻药鸡蛋.md"
+    category: "dishes"
+  - id: g053
+    query: "鸡蛋三明治的做法"
+    expected_doc: "menu/HowToCook/dishes/breakfast/鸡蛋三明治.md"
+    category: "dishes"
+  - id: g054
+    query: "油泼辣子的做法"
+    expected_doc: "menu/HowToCook/dishes/condiment/油泼辣子/油泼辣子.md"
+    category: "condiment"
+  - id: g055
+    query: "油酥的做法"
+    expected_doc: "menu/HowToCook/dishes/condiment/油酥.md"
+    category: "dishes"
+  - id: g056
+    query: "炸串酱料的做法"
+    expected_doc: "menu/HowToCook/dishes/condiment/炸串酱料.md"
+    category: "dishes"
+  - id: g057
+    query: "简易版炒糖色的做法"
+    expected_doc: "menu/HowToCook/dishes/condiment/简易版炒糖色.md"
+    category: "dishes"
+  - id: g058
+    query: "糖醋汁的做法"
+    expected_doc: "menu/HowToCook/dishes/condiment/糖醋汁.md"
+    category: "dishes"
+  - id: g059
+    query: "草莓酱的做法"
+    expected_doc: "menu/HowToCook/dishes/condiment/草莓酱/草莓酱.md"
+    category: "condiment"
+  - id: g060
+    query: "葱油的做法"
+    expected_doc: "menu/HowToCook/dishes/condiment/葱油.md"
+    category: "dishes"
+  - id: g061
+    query: "蒜香酱油的做法"
+    expected_doc: "menu/HowToCook/dishes/condiment/蒜香酱油.md"
+    category: "dishes"
+  - id: g062
+    query: "蔗糖糖浆的做法"
+    expected_doc: "menu/HowToCook/dishes/condiment/蔗糖糖浆/蔗糖糖浆.md"
+    category: "condiment"
+  - id: g063
+    query: "反沙芋头的做法"
+    expected_doc: "menu/HowToCook/dishes/dessert/反沙芋头/反沙芋头.md"
+    category: "dessert"
+  - id: g064
+    query: "咖啡椰奶冻的做法"
+    expected_doc: "menu/HowToCook/dishes/dessert/咖啡椰奶冻/咖啡椰奶冻.md"
+    category: "dessert"
+  - id: g065
+    query: "奥利奥冰淇淋的做法"
+    expected_doc: "menu/HowToCook/dishes/dessert/奥利奥冰淇淋/奥利奥冰淇淋.md"
+    category: "dessert"
+  - id: g066
+    query: "戚风蛋糕的做法"
+    expected_doc: "menu/HowToCook/dishes/dessert/戚风蛋糕/戚风蛋糕.md"
+    category: "dessert"
+  - id: g067
+    query: "提拉米苏的做法"
+    expected_doc: "menu/HowToCook/dishes/dessert/提拉米苏/提拉米苏.md"
+    category: "dessert"
+  - id: g068
+    query: "无厨师机蜂蜜面包的做法"
+    expected_doc: "menu/HowToCook/dishes/dessert/无厨师机蜂蜜面包/无厨师机蜂蜜面包.md"
+    category: "dessert"
+  - id: g069
+    query: "炸鲜奶的做法"
+    expected_doc: "menu/HowToCook/dishes/dessert/炸鲜奶/炸鲜奶.md"
+    category: "dessert"
+  - id: g070
+    query: "烤箱版巴斯克芝士蛋糕的做法"
+    expected_doc: "menu/HowToCook/dishes/dessert/烤箱版巴斯克芝士蛋糕/烤箱版巴斯克芝士蛋糕.md"
+    category: "dessert"
+  - id: g071
+    query: "烤蛋挞的做法"
+    expected_doc: "menu/HowToCook/dishes/dessert/烤蛋挞/烤蛋挞.md"
+    category: "dessert"
+  - id: g072
+    query: "玛格丽特饼干的做法"
+    expected_doc: "menu/HowToCook/dishes/dessert/玛格丽特饼干/玛格丽特饼干.md"
+    category: "dessert"
+  - id: g073
+    query: "红柚蛋糕的做法"
+    expected_doc: "menu/HowToCook/dishes/dessert/红柚蛋糕/红柚蛋糕.md"
+    category: "dessert"
+  - id: g074
+    query: "胡萝卜甜糕的做法"
+    expected_doc: "menu/HowToCook/dishes/dessert/胡萝卜甜糕.md"
+    category: "dishes"
+  - id: g075
+    query: "芋泥雪媚娘的做法"
+    expected_doc: "menu/HowToCook/dishes/dessert/芋泥雪媚娘/芋泥雪媚娘.md"
+    category: "dessert"
+  - id: g076
+    query: "英式司康的做法"
+    expected_doc: "menu/HowToCook/dishes/dessert/英式司康/英式司康.md"
+    category: "dessert"
+  - id: g077
+    query: "草莓冰淇淋的做法"
+    expected_doc: "menu/HowToCook/dishes/dessert/草莓冰淇淋/草莓冰淇淋.md"
+    category: "dessert"
+  - id: g078
+    query: "酸奶意式奶冻的做法"
+    expected_doc: "menu/HowToCook/dishes/dessert/酸奶意式奶冻/酸奶意式奶冻.md"
+    category: "dessert"
+  - id: g079
+    query: "雪花酥的做法"
+    expected_doc: "menu/HowToCook/dishes/dessert/雪花酥/雪花酥.md"
+    category: "dessert"
+  - id: g080
+    query: "魔芋蛋糕的做法"
+    expected_doc: "menu/HowToCook/dishes/dessert/魔芋蛋糕/魔芋蛋糕.md"
+    category: "dessert"

@@ -85,6 +85,12 @@ export default function ChatPage() {
                       {m.latencyTier}
                     </span>
                   ) : null}
+                  {/* deep 档已复核标识（7.1：忠实度校验通过） */}
+                  {m.role === "assistant" && m.verified ? (
+                    <span className="ml-1 inline-block rounded-full bg-green-100 px-2 py-0.5 align-middle text-[10px] text-green-700 dark:bg-green-950 dark:text-green-300">
+                      已复核
+                    </span>
+                  ) : null}
                 </div>
               ))}
             </div>

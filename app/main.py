@@ -30,6 +30,7 @@ from app.api.endpoints import (
     config,
     debug,
     feedback,
+    golden,
     graph,
     health,
     ingestion,
@@ -150,6 +151,7 @@ def create_app() -> FastAPI:
     app.include_router(debug.router, prefix="/api/v1/admin", tags=["admin"])
     app.include_router(communities.router, prefix="/api/v1/admin", tags=["admin"])
     app.include_router(qdrant_debug.router, prefix="/api/v1/admin", tags=["admin"])
+    app.include_router(golden.router, prefix="/api/v1/admin", tags=["admin"])
     app.include_router(health.router, tags=["health"])
     app.include_router(metrics.router, tags=["metrics"])  # 单元 3.6，服务根路径
 

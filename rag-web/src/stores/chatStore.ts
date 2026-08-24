@@ -16,6 +16,8 @@ export interface ChatMessage {
   cacheHit?: boolean;
   /** 实际执行档位（auto 由 query_understanding 定档回写，架构 2.4 v3.1） */
   latencyTier?: string;
+  /** deep 档已复核标识（7.1：忠实度校验通过） */
+  verified?: boolean;
   createdAt?: string;
 }
 
