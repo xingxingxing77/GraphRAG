@@ -98,3 +98,16 @@ retrieval:
     sparse: 0.2
     graph: 0.3
     web: 0.1
+
+# Agent 第 6 层 A/B/E 系列优化项（架构 8.2）
+agent:
+  parallel_fanout: deep_only   # A1: deep 档无依赖子步骤并行扇出
+  reflect_skip_threshold: 0.7  # A2: Top-K 平均 Rerank 分短路阈值
+  evidence_enough_count: 5     # A2: 有效证据数下限
+  evidence_prune:
+    keep_score: 0.25           # B3: 轮间修剪保留分线
+    max_content_chars: 600     # B3: content 截长上限
+  tool_memo:
+    enabled: true              # E3: run 内工具记忆化
+  hitl:
+    enabled: false             # E2: HITL 中断挂点（默认关闭）

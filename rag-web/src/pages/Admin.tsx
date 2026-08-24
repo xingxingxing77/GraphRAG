@@ -10,6 +10,7 @@ import { Activity, Bot, Layers, Settings2, Wrench } from "lucide-react";
 
 import { ChunkBoundaryViewer } from "@/components/ChunkBoundaryViewer";
 import { CleaningDiffCard } from "@/components/CleaningDiffCard";
+import { AgentStateInspector } from "@/components/AgentStateInspector";
 import { CommunitySummaryBrowser } from "@/components/CommunitySummaryBrowser";
 import { EmbeddingProbeCard } from "@/components/EmbeddingProbeCard";
 import { HotReloadDemoCard } from "@/components/HotReloadDemoCard";
@@ -215,8 +216,9 @@ export default function AdminPage() {
               <AgentFlowOverview />
             </div>
             <div>
-              <CardHead title="运行检视" unit="单元 5.2-7.1" />
-              <Pending text="AgentStateInspector / PlanStepsList / FanoutStatusView / ReflectorFeedbackView / RegenerationNotice / FaithfulnessBadge（SSE 聚合，随 10.3 接线）…" />
+              <CardHead title="运行检视" unit="单元 5.1-7.1" />
+              <AgentStateInspector />
+              <Pending text="PlanStepsList / FanoutStatusView / ReflectorFeedbackView / RegenerationNotice / FaithfulnessBadge（SSE 聚合，随 10.3 接线）…" />
             </div>
           </div>
         ) : null}

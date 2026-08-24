@@ -11,15 +11,68 @@ LangSmith trace 中能看到"跳过"。真值表全覆盖单测见 07 §5
 """
 
 # --- 标准库 ---
+from pathlib import Path
 from typing import Any
 
 # --- 本地模块 ---
 from app.agent.state import AgentState
+from app.api.metrics import record_degraded
 
-# --- M3 预算常量（TODO: 迁移至 config/reliability.yaml 并支持热更判定） ---
-MAX_RETRIEVAL_ROUNDS = 3
-MAX_SELF_CORRECTION_RETRIES = 1
-FAITHFULNESS_THRESHOLD = 0.7
+# --- M3 预算常量（config/reliability.yaml agent_budget 驱动，读取失败用默认） ---
+_RELIABILITY_YAML = Path(__file__).resolve().parents[2] / "config" / "reliability.yaml"
+
+
+def _load_budget() -> tuple[int, int, float]:
+    """从 reliability.yaml 读取 M3 预算（回环上限/重试上限/忠实度阈）。
+
+    Returns:
+        (max_retrieval_rounds, max_self_correction_retries, faithfulness_threshold)。
+    """
+    try:
+        import yaml
+
+        with open(_RELIABILITY_YAML, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        budget = cfg.get("agent_budget") or {}
+        return (
+            int(budget.get("max_retrieval_rounds", 3)),
+            int(budget.get("self_correction_max_retries", 1)),
+            0.7,
+        )
+    except Exception:  # noqa: BLE001 - 配置缺失用默认
+        return 3, 1, 0.7
+
+
+MAX_RETRIEVAL_ROUNDS, MAX_SELF_CORRECTION_RETRIES, FAITHFULNESS_THRESHOLD = _load_budget()
+
+# --- A2 短路参数（pipeline_config.yaml agent 段） ---
+_PIPELINE_CONFIG_YAML = Path(__file__).resolve().parents[2] / "config" / "pipeline_config.yaml"
+
+
+def _load_reflect_cfg() -> tuple[float, int]:
+    """读取 A2 短路参数（Top-K 平均分阈 / 有效证据数下限）。
+
+    Returns:
+        (reflect_skip_threshold, evidence_enough_count)。
+    """
+    try:
+        import yaml
+
+        with open(_PIPELINE_CONFIG_YAML, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        agent_cfg = cfg.get("agent") or {}
+        return (
+            float(agent_cfg.get("reflect_skip_threshold", 0.7)),
+            int(agent_cfg.get("evidence_enough_count", 5)),
+        )
+    except Exception:  # noqa: BLE001 - 配置缺失用默认
+        return 0.7, 5
+
+
+REFLECT_SKIP_THRESHOLD, EVIDENCE_ENOUGH_COUNT = _load_reflect_cfg()
+
+# A2 均分评估的 Top-K 窗口
+_A2_TOP_K = 5
 
 # 图节点名常量（graph.py 注册同名节点）
 NODE_PLANNER = "planner"
@@ -42,7 +95,7 @@ def _degrade(state: AgentState, reason: str) -> dict[str, Any]:
     Returns:
         状态增量更新字典。
     """
-    # TODO: 记录 Prometheus 指标 rag_degraded_total{reason}
+    record_degraded(reason)
     return {"degraded": True, "token_budget_exhausted": True}
 
 
@@ -64,11 +117,17 @@ def route_after_tool_router(state: AgentState) -> str:
         return NODE_GENERATOR
     if _is_direct_answer_only(state):
         return NODE_GENERATOR
-    return NODE_REFLECTOR
+    return route_reflect_entry(state)
 
 
 def route_reflect_entry(state: AgentState) -> str:
     """反思入口的 A2 短路判定（条件边函数内纯代码判定，05 §5.2）。
+
+    短路条件（任一满足即跳过反思 LLM 调用）：
+    1. B4 预算耗尽；
+    2. fast 档（无需反思）；
+    3. 有效证据数 ≥ evidence_enough_count；
+    4. Top-K 平均分 ≥ reflect_skip_threshold。
 
     Args:
         state: 当前 Agent 状态。
@@ -77,9 +136,18 @@ def route_reflect_entry(state: AgentState) -> str:
         目标节点名：短路时 generator（trace 中无 reflector span），
         否则 reflector。
     """
-    # TODO(5.4): A2 短路条件细化（fast 档/单步计划等短路规则）
     if state["token_budget_exhausted"]:
         return NODE_GENERATOR
+    if state.get("latency_tier") == "fast":
+        return NODE_GENERATOR
+    evidence = state.get("retrieved_evidence") or []
+    if len(evidence) >= EVIDENCE_ENOUGH_COUNT:
+        return NODE_GENERATOR
+    top = evidence[:_A2_TOP_K]
+    if top:
+        avg_score = sum(r.score for r in top) / len(top)
+        if avg_score >= REFLECT_SKIP_THRESHOLD:
+            return NODE_GENERATOR
     return NODE_REFLECTOR
 
 

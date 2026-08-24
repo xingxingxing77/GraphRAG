@@ -1,19 +1,28 @@
 """
-OpenAI 兼容统一 LLM 客户端（J1）。
+OpenAI 兼容统一 LLM 客户端（J1 · 单元 5.2 前置）。
 
 所有云端/本地模型条目均经 OpenAI 兼容协议访问（含 Ollama /v1）。
 TokenUsage 上报采用 Ollama 口径（prompt_eval_count / eval_count
-自动映射，05 §4）。
+自动映射，05 §4）。独立超时取 reliability.yaml llm_call（铁律 3）。
 """
 
 # --- 标准库 ---
+import logging
+import time
 from typing import Any
 
 # --- 第三方库 ---
+import httpx
 from pydantic import BaseModel, Field
 
 # --- 本地模块 ---
+from app.api.metrics import record_llm_tokens
 from app.core.models import TokenUsage
+
+logger = logging.getLogger(__name__)
+
+# 独立超时（reliability.yaml timeouts_seconds.llm_call）
+_LLM_TIMEOUT_S = 30.0
 
 
 class ModelEntry(BaseModel):
@@ -60,7 +69,6 @@ class LLMClient:
         """
         self.entry = entry
         self.api_key = api_key
-        # TODO: 创建 httpx.AsyncClient / OpenAI 兼容 SDK 实例（连接池复用）
 
     async def chat(
         self,
@@ -70,7 +78,7 @@ class LLMClient:
         model: str | None = None,
         response_format: dict[str, str] | None = None,
     ) -> ChatCompletion:
-        """执行一次 chat 调用。
+        """执行一次 chat 调用（独立超时，铁律 3）。
 
         Args:
             messages: 对话消息列表 [{"role": ..., "content": ...}]。
@@ -80,8 +88,76 @@ class LLMClient:
 
         Returns:
             ChatCompletion: 生成结果（含 TokenUsage）。
+
+        Raises:
+            httpx.HTTPError: 网络/超时/非 2xx（由 fallback 链接管）。
+            RuntimeError: 响应体结构异常。
         """
-        # TODO: 组装请求（base_url/model/params 合并覆盖）
-        # TODO: 独立超时（reliability.yaml，async 铁律 3）
-        # TODO: Token 用量映射为 TokenUsage（Ollama 口径）
-        raise NotImplementedError
+        payload: dict[str, Any] = {
+            "model": model or self.entry.model,
+            "messages": messages,
+            "stream": False,
+        }
+        merged = dict(self.entry.params)
+        if temperature is not None:
+            merged["temperature"] = temperature
+        payload.update(merged)
+        if response_format is not None:
+            payload["response_format"] = response_format
+
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        start = time.perf_counter()
+        async with httpx.AsyncClient(timeout=_LLM_TIMEOUT_S) as client:
+            resp = await client.post(
+                f"{self.entry.base_url.rstrip('/')}/chat/completions",
+                json=payload,
+                headers=headers,
+            )
+            resp.raise_for_status()
+        latency_ms = int((time.perf_counter() - start) * 1000)
+
+        data = resp.json()
+        choices = data.get("choices") or []
+        if not choices:
+            raise RuntimeError(f"LLM 响应缺少 choices: {self.entry.model}")
+        content = str(choices[0].get("message", {}).get("content") or "")
+        usage = self._map_usage(data, latency_ms)
+        if usage is not None:
+            record_llm_tokens("prompt", usage.model, usage.prompt_tokens)
+            record_llm_tokens("completion", usage.model, usage.completion_tokens)
+        return ChatCompletion(
+            content=content,
+            model=str(data.get("model") or payload["model"]),
+            usage=usage,
+            raw=data,
+        )
+
+    def _map_usage(self, data: dict[str, Any], latency_ms: int) -> TokenUsage | None:
+        """映射 Token 用量（Ollama 口径优先，兼容 OpenAI 口径）。
+
+        Args:
+            data: 供应商原始响应体。
+            latency_ms: 调用耗时（毫秒）。
+
+        Returns:
+            TokenUsage；无用量字段时返回 None。
+        """
+        usage_raw = data.get("usage") or {}
+        if not usage_raw:
+            return None
+        prompt_tokens = int(
+            usage_raw.get("prompt_eval_count")
+            or usage_raw.get("prompt_tokens")
+            or 0
+        )
+        completion_tokens = int(
+            usage_raw.get("eval_count")
+            or usage_raw.get("completion_tokens")
+            or 0
+        )
+        return TokenUsage(
+            model=self.entry.model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            latency_ms=latency_ms,
+        )
