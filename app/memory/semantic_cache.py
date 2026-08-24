@@ -1,98 +1,328 @@
 """
-语义缓存。
+语义缓存（单元 8.3，J22/H2，04 §3.3 + 04 §4）。
 
-实现 L1 语义缓存和 L2 检索结果缓存，降低重复请求的延迟和成本。
+两级结构（命名以 04 为唯一权威）：
+- L1：Qdrant `rag_cache` 集合 ANN top-1，score ≥ 0.95 视为命中——
+  Redis 无原生向量检索能力，精确文本 hash 无法匹配同义改写，
+  故 L1 必须走向量相似度（架构 H2 决策原文）；
+- L2：Redis `l2:ret:{norm_hash}` 精确 hash 检索结果缓存，TTL 600s。
+
+可靠性约定（07 A-11）：Qdrant/Embedding 异常一律返回降级 miss
+（degraded=True），调用方置 X-Degraded: no-cache，缓存永不阻塞主链路。
+single-flight：同键并发 miss 合并为一次回源加载（11 路线图 Phase 4）。
 """
 
 # --- 标准库 ---
+import asyncio
 import hashlib
 import json
-from typing import Any, Optional
+import time
+import uuid
+from collections.abc import Awaitable, Callable
+
+# --- 第三方库 ---
+from pydantic import BaseModel, Field
+from qdrant_client.models import FieldCondition, Filter, MatchValue, PointStruct, Range
 
 # --- 本地模块 ---
+from app.core.models import Citation
+from app.db.qdrant_client import QdrantDBClient
 from app.db.redis_client import RedisClient
+from app.embedding.base import EmbeddingService
+
+# L1 命中阈值（H2：top-1 score ≥ 0.95）
+L1_HIT_THRESHOLD = 0.95
+
+# 集合与 Key（04 §3.3 / §4 唯一命名出处）
+RAG_CACHE_COLLECTION = "rag_cache"
+L2_KEY_PREFIX = "l2:ret:"
+
+# 缓存条目 point ID 派生命名空间（同问题恒同 ID → 幂等覆盖写）
+_POINT_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "graphrag://rag-cache-point")
+
+
+class L1Lookup(BaseModel):
+    """L1 查询结果（内部服务载荷，端点层映射为 PrecheckResponse）。
+
+    Attributes:
+        hit: 是否命中（score ≥ 0.95）。
+        degraded: 存储异常导致的降级 miss（X-Degraded: no-cache 依据）。
+        cache_score: 命中相似度分数。
+        matched_query: 命中的缓存问题原文。
+        answer: 缓存答案。
+        citations: 缓存引用列表。
+        model: 产出该答案的模型条目名。
+    """
+
+    hit: bool = False
+    degraded: bool = False
+    cache_score: float | None = None
+    matched_query: str | None = None
+    answer: str | None = None
+    citations: list[Citation] = Field(default_factory=list)
+    model: str | None = None
+
+
+class L1Entry(BaseModel):
+    """待写入 L1 的答案条目（仅非个性化答案，H2）。"""
+
+    question: str
+    answer: str
+    citations: list[Citation] = Field(default_factory=list)
+    matched_doc_ids: list[str] = Field(default_factory=list)
+    latency_tier: str = "standard"
+    model: str = ""
 
 
 class SemanticCache:
-    """语义缓存管理器。
+    """语义缓存管理器（L1 Qdrant ANN + L2 Redis 精确 hash）。
 
-    - L1 缓存: Key=查询向量 hash，Value=完整回答（TTL=1h）
-    - L2 缓存: Key=查询+参数 hash，Value=检索结果（TTL=10min）
+    Attributes:
+        qdrant: Qdrant 客户端。
+        embedder: Embedding 服务（dense 通道）。
+        redis: Redis 客户端（L2）。
+        threshold: L1 命中阈值。
+        l1_ttl_seconds: L1 应用层 TTL（每日 purge_expired 清理）。
+        l2_ttl_seconds: L2 Redis TTL。
     """
 
-    def __init__(self, redis: RedisClient) -> None:
-        """初始化语义缓存。
-
-        Args:
-            redis: Redis 客户端实例。
-        """
+    def __init__(
+        self,
+        qdrant: QdrantDBClient,
+        embedder: EmbeddingService,
+        redis: RedisClient,
+        *,
+        threshold: float = L1_HIT_THRESHOLD,
+        l1_ttl_seconds: int = 3600,
+        l2_ttl_seconds: int = 600,
+    ) -> None:
+        """初始化语义缓存。"""
+        self.qdrant = qdrant
+        self.embedder = embedder
         self.redis = redis
-        self.l1_prefix = "cache:l1:"
-        self.l2_prefix = "cache:l2:"
-        self.l1_ttl = 3600  # 1 小时
-        self.l2_ttl = 600   # 10 分钟
+        self.threshold = threshold
+        self.l1_ttl_seconds = l1_ttl_seconds
+        self.l2_ttl_seconds = l2_ttl_seconds
+        # single-flight：norm_hash → 回源任务（并发同查询合并为一次加载）
+        self._inflight: dict[str, asyncio.Task[L1Lookup]] = {}
+        self._inflight_lock = asyncio.Lock()
 
-    async def get_l1(self, query_hash: str) -> Optional[str]:
-        """查询 L1 语义缓存。
+    # ---------- 工具 ----------
+
+    @staticmethod
+    def normalize(text: str) -> str:
+        """查询规范化：压缩空白并小写（norm_hash 口径，04 §4）。"""
+        return " ".join(text.split()).lower()
+
+    @classmethod
+    def norm_hash(cls, query: str, params: dict[str, object] | None = None) -> str:
+        """规范化哈希：sha256(规范化查询+参数) 前 24 位（04 §4）。"""
+        material = cls.normalize(query)
+        if params:
+            material += "|" + json.dumps(params, sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
+
+    async def _query_vector(self, query: str) -> list[float]:
+        """查询文本 → dense 向量（BGE-M3 dense 通道）。"""
+        result = await self.embedder.embed([query])
+        if not result.dense or not result.dense[0]:
+            raise ValueError("embedding 返回空 dense 向量")
+        return result.dense[0]
+
+    # ---------- L1：Qdrant rag_cache ----------
+
+    async def get_l1(self, query: str) -> L1Lookup:
+        """ANN top-1 查询 L1 语义缓存（异常降级为 miss，A-11）。
+
+        读侧同时过滤过期点（created_at ≥ now-TTL），避免日清间隙
+        返回陈旧条目。
 
         Args:
-            query_hash: 查询的向量哈希或文本哈希。
+            query: 用户原始查询（改写前，04 §3.3 向量口径）。
 
         Returns:
-            缓存的回答文本，未命中返回 None。
+            L1Lookup: 命中详情或（降级）miss。
         """
-        # TODO: 从 Redis 读取 L1 缓存
-        raise NotImplementedError
+        try:
+            vector = await self._query_vector(query)
+            fresh_from = int(time.time()) - self.l1_ttl_seconds
+            flt = Filter(
+                must=[
+                    FieldCondition(key="created_at", range=Range(gte=float(fresh_from)))
+                ]
+            )
+            hits = await self.qdrant.search(
+                RAG_CACHE_COLLECTION, vector, top_k=1, filter_condition=flt
+            )
+        except Exception:  # noqa: BLE001 - 缓存永不阻塞主链路（A-11）
+            return L1Lookup(hit=False, degraded=True)
+        if not hits:
+            return L1Lookup(hit=False)
+        top = hits[0]
+        if top["score"] < self.threshold:
+            return L1Lookup(hit=False, cache_score=top["score"])
+        payload = top["payload"]
+        try:
+            citations = [
+                Citation.model_validate(item)
+                for item in json.loads(payload.get("citations_json", "[]"))
+            ]
+        except (json.JSONDecodeError, ValueError):
+            citations = []
+        return L1Lookup(
+            hit=True,
+            cache_score=top["score"],
+            matched_query=str(payload.get("question", "")),
+            answer=str(payload.get("answer", "")),
+            citations=citations,
+            model=payload.get("model"),
+        )
 
-    async def set_l1(self, query_hash: str, answer: str) -> None:
-        """写入 L1 语义缓存。
+    async def set_l1(self, entry: L1Entry) -> None:
+        """写入 L1 缓存条目（幂等：同问题 uuid5 覆盖写）。
+
+        仅允许非个性化答案进入（个性化上下文注入过的回答由调用方
+        负责不落缓存，H2）。写入前幂等确保集合存在；失败静默——
+        缓存写失败不影响主链路。
 
         Args:
-            query_hash: 查询哈希。
-            answer: 完整回答文本。
+            entry: 待缓存条目。
         """
-        # TODO: 写入 Redis 并设置 TTL
-        raise NotImplementedError
+        try:
+            await self.qdrant.ensure_collection(RAG_CACHE_COLLECTION)
+            vector = await self._query_vector(entry.question)
+            point_id = str(
+                uuid.uuid5(_POINT_ID_NAMESPACE, self.normalize(entry.question))
+            )
+            point = PointStruct(
+                id=point_id,
+                vector={"dense": vector},
+                payload={
+                    "question": entry.question,
+                    "answer": entry.answer,
+                    "citations_json": json.dumps(
+                        [c.model_dump() for c in entry.citations],
+                        ensure_ascii=False,
+                    ),
+                    "matched_doc_ids": entry.matched_doc_ids,
+                    "latency_tier": entry.latency_tier,
+                    "created_at": int(time.time()),
+                    "model": entry.model,
+                },
+            )
+            await self.qdrant.upsert_points(RAG_CACHE_COLLECTION, [point])
+        except Exception:  # noqa: BLE001 - 写失败不影响主链路
+            return
 
-    async def get_l2(self, query_hash: str) -> Optional[list[dict[str, Any]]]:
-        """查询 L2 检索结果缓存。
+    async def invalidate_doc(self, doc_id: str) -> None:
+        """按文档反查清除受影响的 L1 条目（04 §7 失效联动）。
 
         Args:
-            query_hash: 查询+参数哈希。
+            doc_id: 变更/删除的文档 ID。
+        """
+        try:
+            await self.qdrant.delete_by_payload_match(
+                RAG_CACHE_COLLECTION, "matched_doc_ids", doc_id
+            )
+        except Exception:  # noqa: BLE001 - 失效联动失败不阻塞主流程
+            return
+
+    async def purge_expired(self, now: int | None = None) -> int:
+        """清理过期 L1 点（应用层定时任务，Qdrant 无原生 TTL）。
+
+        Args:
+            now: 当前 unix 秒（默认取系统时间）。
 
         Returns:
-            缓存的检索结果列表，未命中返回 None。
+            删除的点数（异常时返回 0）。
         """
-        # TODO: 从 Redis 读取并反序列化 L2 缓存
-        raise NotImplementedError
+        current = now if now is not None else int(time.time())
+        try:
+            return await self.qdrant.delete_created_before(
+                RAG_CACHE_COLLECTION, "created_at", current - self.l1_ttl_seconds
+            )
+        except Exception:  # noqa: BLE001 - 定时任务失败仅记录不抛出
+            return 0
+
+    # ---------- single-flight ----------
+
+    async def get_or_load(self, query: str, loader: Callable[[], Awaitable[L1Entry]]) -> L1Lookup:
+        """带 single-flight 的查取：命中直接返回；未命中合并并发回源并回填。
+
+        同一规范化查询的并发调用共享同一个回源任务，避免缓存击穿
+        （11 路线图 Phase 4）。回源结果经 set_l1 幂等回填。
+
+        Args:
+            query: 用户查询。
+            loader: 未命中时的回源协程工厂（返回可缓存条目）。
+
+        Returns:
+            L1Lookup: 命中、回源成功（含新条目内容）或降级 miss。
+        """
+        first = await self.get_l1(query)
+        if first.hit or first.degraded:
+            return first
+        key = self.norm_hash(query)
+        async with self._inflight_lock:
+            task = self._inflight.get(key)
+            if task is None:
+                task = asyncio.create_task(self._load_and_store(query, loader))
+                self._inflight[key] = task
+        try:
+            return await task
+        finally:
+            async with self._inflight_lock:
+                if self._inflight.get(key) is task:
+                    del self._inflight[key]
+
+    async def _load_and_store(
+        self, query: str, loader: Callable[[], Awaitable[L1Entry]]
+    ) -> L1Lookup:
+        """执行回源加载并回填 L1（single-flight 共享体）。"""
+        try:
+            entry = await loader()
+        except Exception:  # noqa: BLE001 - 回源失败按普通 miss 返回
+            return L1Lookup(hit=False)
+        await self.set_l1(entry)
+        return L1Lookup(
+            hit=True,
+            cache_score=1.0,
+            matched_query=entry.question,
+            answer=entry.answer,
+            citations=entry.citations,
+            model=entry.model,
+        )
+
+    # ---------- L2：Redis l2:ret:{norm_hash} ----------
+
+    async def get_l2(
+        self, query: str, params: dict[str, object] | None = None
+    ) -> list[dict[str, object]] | None:
+        """读取 L2 检索结果缓存（异常返回 None，不阻塞）。"""
+        try:
+            raw = await self.redis.get(L2_KEY_PREFIX + self.norm_hash(query, params))
+        except Exception:  # noqa: BLE001
+            return None
+        if raw is None:
+            return None
+        try:
+            decoded = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        return decoded if isinstance(decoded, list) else None
 
     async def set_l2(
         self,
-        query_hash: str,
-        results: list[dict[str, Any]],
+        query: str,
+        results: list[dict[str, object]],
+        params: dict[str, object] | None = None,
     ) -> None:
-        """写入 L2 检索结果缓存。
-
-        Args:
-            query_hash: 查询+参数哈希。
-            results: 检索结果列表。
-        """
-        # TODO: 序列化并写入 Redis，设置 TTL
-        raise NotImplementedError
-
-    async def clear_all(self) -> None:
-        """清空所有缓存。"""
-        # TODO: 删除所有 cache:l1:* 和 cache:l2:* 的 key
-        raise NotImplementedError
-
-    @staticmethod
-    def compute_hash(text: str) -> str:
-        """计算文本的 SHA-256 哈希。
-
-        Args:
-            text: 输入文本。
-
-        Returns:
-            哈希值字符串。
-        """
-        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+        """写入 L2 检索结果缓存（TTL 600s，写失败静默）。"""
+        try:
+            await self.redis.set(
+                L2_KEY_PREFIX + self.norm_hash(query, params),
+                json.dumps(results, ensure_ascii=False),
+                ttl=self.l2_ttl_seconds,
+            )
+        except Exception:  # noqa: BLE001
+            return

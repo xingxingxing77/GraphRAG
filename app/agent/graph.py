@@ -12,16 +12,20 @@ from langgraph.graph.state import CompiledStateGraph
 
 # --- 本地模块 ---
 from app.agent.nodes.generator import generator_node
+from app.agent.nodes.load_memory import load_memory_node
 from app.agent.nodes.planner import planner_node
 from app.agent.nodes.reflector import reflector_node
 from app.agent.nodes.self_correction import self_correction_node
 from app.agent.nodes.tool_router import tool_router_node
+from app.agent.nodes.write_back import write_back_node
 from app.agent.routers import (
     NODE_GENERATOR,
+    NODE_LOAD_MEMORY,
     NODE_PLANNER,
     NODE_REFLECTOR,
     NODE_SELF_CORRECTION,
     NODE_TOOL_ROUTER,
+    NODE_WRITE_BACK,
     route_after_reflector,
     route_after_self_correction,
     route_after_tool_router,
@@ -36,14 +40,17 @@ RECURSION_LIMIT = 15
 def build_agent_graph() -> CompiledStateGraph[AgentState]:
     """构建并编译 LangGraph Agent 状态图。
 
-    状态图流程（05 §5.3，骨架阶段为五节点主环）:
-        START -> planner -> tool_router
+    状态图流程（05 §5.3；8.1/8.3 记忆读写节点已接入）:
+        START -> load_memory -> planner -> tool_router
         tool_router -> [cond] 直答/B4 预算耗尽 -> generator
                     -> 其余 -> reflector
         reflector -> [cond needs_more_retrieval && rounds<3] -> planner(增量补计划)
                   -> 否则 -> generator
         generator -> self_correction -> [cond score<阈值 && retries<1] -> generator
-                                     -> 否则 -> END
+                                      -> 否则 -> write_back（wm/episodic/rag_cache 三件事）-> END
+
+    注入锚点：load_memory 固定在 START 之后——阶段 6 的查询改写/
+    意图节点接入时必须排在其后（04 §4「注入在改写前」，J17）。
 
     Returns:
         CompiledStateGraph: 编译后的 Agent 状态图。
@@ -51,14 +58,17 @@ def build_agent_graph() -> CompiledStateGraph[AgentState]:
     graph = StateGraph(AgentState)
 
     # --- 节点注册 ---
+    graph.add_node(NODE_LOAD_MEMORY, load_memory_node)
     graph.add_node(NODE_PLANNER, planner_node)
     graph.add_node(NODE_TOOL_ROUTER, tool_router_node)
     graph.add_node(NODE_REFLECTOR, reflector_node)
     graph.add_node(NODE_GENERATOR, generator_node)
     graph.add_node(NODE_SELF_CORRECTION, self_correction_node)
+    graph.add_node(NODE_WRITE_BACK, write_back_node)
 
     # --- 边绑定 ---
-    graph.add_edge(START, NODE_PLANNER)
+    graph.add_edge(START, NODE_LOAD_MEMORY)
+    graph.add_edge(NODE_LOAD_MEMORY, NODE_PLANNER)
     graph.add_edge(NODE_PLANNER, NODE_TOOL_ROUTER)
     # 直答单步(J9) / B4 预算耗尽 -> generator；其余 -> reflector
     graph.add_conditional_edges(
@@ -73,11 +83,13 @@ def build_agent_graph() -> CompiledStateGraph[AgentState]:
         {NODE_PLANNER: NODE_PLANNER, NODE_GENERATOR: NODE_GENERATOR},
     )
     graph.add_edge(NODE_GENERATOR, NODE_SELF_CORRECTION)
-    # 忠实度不达标且重试未耗尽 -> 重生成；否则结束
+    # 忠实度不达标且重试未耗尽 -> 重生成；否则写侧尾节点收尾
+    # （router 返回值保持 "__end__" 语义不变，由映射改道 write_back）
     graph.add_conditional_edges(
         NODE_SELF_CORRECTION,
         route_after_self_correction,
-        {NODE_GENERATOR: NODE_GENERATOR, END: END},
+        {NODE_GENERATOR: NODE_GENERATOR, END: NODE_WRITE_BACK},
     )
+    graph.add_edge(NODE_WRITE_BACK, END)
 
     return graph.compile()

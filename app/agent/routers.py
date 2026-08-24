@@ -80,6 +80,9 @@ NODE_TOOL_ROUTER = "tool_router"
 NODE_REFLECTOR = "reflector"
 NODE_GENERATOR = "generator"
 NODE_SELF_CORRECTION = "self_correction"
+# 单元 8.1/8.3：记忆注入前置节点（置于改写前）与写侧尾节点
+NODE_LOAD_MEMORY = "load_memory"
+NODE_WRITE_BACK = "write_back"
 
 
 def _degrade(state: AgentState, reason: str) -> dict[str, Any]:

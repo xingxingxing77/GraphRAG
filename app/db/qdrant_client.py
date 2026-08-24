@@ -22,7 +22,9 @@ from qdrant_client.models import (
     FilterSelector,
     HnswConfigDiff,
     MatchValue,
+    PointIdsList,
     PointStruct,
+    Range,
     SparseVector,
     SparseVectorParams,
     VectorParams,
@@ -241,16 +243,78 @@ class QdrantDBClient:
             collection_name: Collection 名称。
             doc_id: 文档 ID。
         """
+        await self.delete_by_payload_match(collection_name, "doc_id", doc_id)
+
+    async def delete_by_payload_match(
+        self,
+        collection_name: str,
+        key: str,
+        value: Any,
+    ) -> None:
+        """按 payload 字段精确匹配删除（数组字段为包含语义）。
+
+        记忆层使用：rag_cache 按 matched_doc_ids 反查失效（04 §7）、
+        rag_episodic 按 session_id 级联删除（07 A-05）。
+
+        Args:
+            collection_name: Collection 名称。
+            key: payload 字段名。
+            value: 匹配值（payload 为数组时命中含该值的点）。
+        """
         client = await self._ensure_client()
         if not await client.collection_exists(collection_name):
             return
-        flt = Filter(
-            must=[FieldCondition(key="doc_id", match=MatchValue(value=doc_id))]
-        )
+        flt = Filter(must=[FieldCondition(key=key, match=MatchValue(value=value))])
         await client.delete(
             collection_name=collection_name,
             points_selector=FilterSelector(filter=flt),
         )
+
+    async def delete_created_before(
+        self,
+        collection_name: str,
+        field: str,
+        before_unix: int,
+        batch: int = 500,
+    ) -> int:
+        """删除数值字段早于阈值的点（rag_cache 应用层 TTL 清理，04 §3.3）。
+
+        Qdrant 无原生 TTL，过期策略为应用层定时任务。
+
+        Args:
+            collection_name: Collection 名称。
+            field: 时间戳 payload 字段名（unix 秒）。
+            before_unix: 删除该时刻之前的点。
+            batch: 单轮滚动拉取上限。
+
+        Returns:
+            实际删除的点数。
+        """
+        client = await self._ensure_client()
+        if not await client.collection_exists(collection_name):
+            return 0
+        flt = Filter(
+            must=[FieldCondition(key=field, range=Range(lt=float(before_unix)))]
+        )
+        deleted = 0
+        while True:
+            records, offset = await client.scroll(
+                collection_name=collection_name,
+                scroll_filter=flt,
+                limit=batch,
+                with_payload=False,
+            )
+            if not records:
+                break
+            ids = [r.id for r in records]
+            await client.delete(
+                collection_name=collection_name,
+                points_selector=PointIdsList(points=ids),
+            )
+            deleted += len(ids)
+            if offset is None:
+                break
+        return deleted
 
     async def count(self, collection_name: str, doc_id: str | None = None) -> int:
         """统计 Collection 点数（可按 doc_id 过滤）。

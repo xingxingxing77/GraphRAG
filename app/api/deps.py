@@ -21,6 +21,10 @@ from app.db.redis_client import RedisClient
 from app.embedding.base import EmbeddingService
 from app.embedding.ollama_client import OllamaClient
 from app.embedding.service import BgeM3EmbeddingService
+from app.memory.conversation import ConversationMemory
+from app.memory.episodic import EpisodicMemory
+from app.memory.scheduler import MemoryScheduler
+from app.memory.semantic_cache import SemanticCache
 from app.pipeline.config import load_pipeline_config
 from app.pipeline.ingestion.manifest import JsonFileManifestStore
 from app.pipeline.ingestion.service import IngestionService
@@ -99,13 +103,21 @@ _reranker: BGEReranker | None = None
 
 
 async def get_redis_client() -> AsyncGenerator[RedisClient, None]:
-    """获取 Redis 客户端实例（依赖注入）。
+    """获取 Redis 客户端实例（依赖注入，单例复用连接）。
 
     Yields:
-        RedisClient: 已连接的 Redis 客户端。
+        RedisClient: 已配置的 Redis 客户端（首用时建立连接）。
     """
-    # TODO: 创建并 yield Redis 客户端，确保关闭
-    raise NotImplementedError
+    global _redis_client
+    if _redis_client is None:
+        settings = get_settings()
+        _redis_client = RedisClient(
+            host=settings.redis_host, port=settings.redis_port, db=settings.redis_db
+        )
+    yield _redis_client
+
+
+_redis_client: RedisClient | None = None
 
 
 async def get_embedding_service() -> EmbeddingService:
@@ -164,3 +176,81 @@ def get_ingestion_service() -> IngestionService:
             base_dir=_REPO_ROOT,
         )
     return _ingestion_service
+
+
+# ============================================================
+# 记忆层服务栈（单元 8.1-8.3）
+# ============================================================
+
+
+class MemoryStack:
+    """记忆层组件聚合（图节点经 get_memory_stack 惰性获取）。
+
+    Attributes:
+        redis: Redis 客户端。
+        qdrant: Qdrant 客户端。
+        conversation: 工作记忆。
+        episodic: 情景记忆。
+        scheduler: 注入调度器。
+        semantic_cache: 语义缓存（L1 ANN + L2 Redis）。
+    """
+
+    def __init__(
+        self,
+        redis: RedisClient,
+        qdrant: QdrantDBClient,
+        conversation: "ConversationMemory",
+        episodic: "EpisodicMemory",
+        scheduler: "MemoryScheduler",
+        semantic_cache: "SemanticCache",
+    ) -> None:
+        self.redis = redis
+        self.qdrant = qdrant
+        self.conversation = conversation
+        self.episodic = episodic
+        self.scheduler = scheduler
+        self.semantic_cache = semantic_cache
+
+
+_memory_stack: MemoryStack | None = None
+
+
+async def get_memory_stack() -> MemoryStack:
+    """获取记忆层服务栈单例（客户端连接均首用时惰性建立）。
+
+    Returns:
+        MemoryStack: 组装完成的记忆层组件集合。
+    """
+    global _memory_stack
+    if _memory_stack is None:
+        settings = get_settings()
+        redis = RedisClient(
+            host=settings.redis_host, port=settings.redis_port, db=settings.redis_db
+        )
+        qdrant = QdrantDBClient(host=settings.qdrant_host, port=settings.qdrant_port)
+        embedder = await get_embedding_service()
+        conversation = ConversationMemory(redis)
+        episodic = EpisodicMemory(qdrant, embedder)
+        scheduler = MemoryScheduler(conversation, episodic, embedder)
+        semantic_cache = SemanticCache(
+            qdrant=qdrant, embedder=embedder, redis=redis
+        )
+        _memory_stack = MemoryStack(
+            redis=redis,
+            qdrant=qdrant,
+            conversation=conversation,
+            episodic=episodic,
+            scheduler=scheduler,
+            semantic_cache=semantic_cache,
+        )
+    return _memory_stack
+
+
+async def get_semantic_cache() -> AsyncGenerator[SemanticCache, None]:
+    """获取语义缓存单例（precheck 端点依赖注入入口）。
+
+    Yields:
+        SemanticCache: L1 ANN + L2 Redis 语义缓存。
+    """
+    stack = await get_memory_stack()
+    yield stack.semantic_cache
