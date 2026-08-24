@@ -60,9 +60,9 @@ async def write_back_node(state: AgentState) -> dict[str, object]:
     question = str(state.get("original_query", state.get("query", "")))
 
     try:
-        history_len = len(await stack.conversation.get_history(session_id))
+        history_len = len(await stack.working_memory.get_history(session_id))
         # 1) 工作记忆
-        await stack.conversation.add_exchange(session_id, question, answer)
+        await stack.working_memory.add_exchange(session_id, question, answer)
         # 2) 情景记忆（turn_seq 取写入前长度 +1，重放幂等由 point ID 保证）
         await stack.episodic.add(
             session_id, user_id, history_len + 1, question, answer
