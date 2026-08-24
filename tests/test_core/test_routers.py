@@ -112,7 +112,11 @@ class TestDegradeHelper:
     def test_idempotent_on_already_degraded_state(self) -> None:
         state = _state(degraded=True, token_budget_exhausted=True)
         update = _degrade(state, reason="llm-fallback")
-        assert update == {"degraded": True, "token_budget_exhausted": True}
+        assert update == {
+            "degraded": True,
+            "token_budget_exhausted": True,
+            "degraded_reasons": ["llm-fallback"],
+        }
 
     def test_budget_exhausted_state_never_loops(self) -> None:
         """B4：预算耗尽态下全部条件边直入 generator，不回环。"""

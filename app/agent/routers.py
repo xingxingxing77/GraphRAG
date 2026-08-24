@@ -97,10 +97,14 @@ def _degrade(state: AgentState, reason: str) -> dict[str, Any]:
         reason: 降级原因（上报 rag_degraded_total{reason} 指标）。
 
     Returns:
-        状态增量更新字典。
+        状态增量更新字典（含 budget-exhausted 降级原因，9.1）。
     """
     record_degraded(reason)
-    return {"degraded": True, "token_budget_exhausted": True}
+    return {
+        "degraded": True,
+        "token_budget_exhausted": True,
+        "degraded_reasons": [reason],
+    }
 
 
 def route_after_tool_router(state: AgentState) -> str:

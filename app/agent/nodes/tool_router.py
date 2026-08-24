@@ -164,6 +164,17 @@ async def tool_router_node(state: AgentState) -> dict[str, Any]:
     memo_enabled = bool((agent_cfg.get("tool_memo") or {}).get("enabled", True))
     parallel_fanout = str(agent_cfg.get("parallel_fanout", "deep_only"))
 
+    # E-07：图谱系检索器（graph/global/fulltext）故障 → no-graph 降级原因（9.1）
+    degraded_reasons: list[str] = []
+    try:
+        hub_snapshot = await _get_retriever_hub()
+        graph_family_errors_before = sum(
+            getattr(hub_snapshot.get(name), "error_count", 0)
+            for name in ("graph", "global", "fulltext")
+        )
+    except Exception:  # noqa: BLE001 - hub 不可用时无法快照
+        graph_family_errors_before = 0
+
     pending = [s for s in plan if s.status != "done"]
     cache: dict[str, RetrievalResult] = dict(state.get("tool_call_cache") or {})
     cache_updates: dict[str, RetrievalResult] = {}
@@ -216,13 +227,28 @@ async def tool_router_node(state: AgentState) -> dict[str, Any]:
     ]
     cache.update(cache_updates)
 
-    return {
+    # E-07：图谱系检索器本轮新增错误 → no-graph（Neo4j/ES 不可达）
+    try:
+        hub_after = await _get_retriever_hub()
+        graph_family_errors_after = sum(
+            getattr(hub_after.get(name), "error_count", 0)
+            for name in ("graph", "global", "fulltext")
+        )
+        if graph_family_errors_after > graph_family_errors_before:
+            degraded_reasons.append("no-graph")
+    except Exception:  # noqa: BLE001 - hub 不可用不阻塞
+        pass
+
+    updates: dict[str, Any] = {
         "retrieved_evidence": pruned,
         "tool_call_cache": cache,
         "plan": done_plan,
         "current_step": len(plan),
         "retrieval_rounds": int(state.get("retrieval_rounds", 0)) + 1,
     }
+    if degraded_reasons:
+        updates["degraded_reasons"] = degraded_reasons
+    return updates
 
 
 # --- 检索器集线器（惰性单例，依赖不可用时抛错由调用方降级） ---

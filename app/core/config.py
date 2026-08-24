@@ -36,9 +36,21 @@ class AppSettings(BaseSettings):
         default=["http://localhost:5173"], description="允许的跨域来源"
     )
 
+    # --- 限流（单元 9.2，D6）：默认关闭，生产经环境变量开启 ---
+    rate_limit_enabled: bool = Field(
+        default=False, description="是否启用全局限流中间件"
+    )
+    rate_limit_max_requests: int = Field(
+        default=60, description="窗口内最大请求数"
+    )
+    rate_limit_window_seconds: int = Field(
+        default=60, description="限流窗口（秒）"
+    )
+
     # --- 密钥与认证（仅变量名/值经环境变量注入，D7/J16） ---
     jwt_secret: str = Field(
-        default="change-me", description="JWT 签名密钥（与 langgraph-server 共享，J16/J19）"
+        default="dev-insecure-secret-please-replace-in-prod-env",
+        description="JWT 签名密钥（与 langgraph-server 共享，J16/J19；≥32 字节，生产经 env 注入随机值）",
     )
     deepseek_api_key: Optional[str] = Field(
         default=None, description="models.yaml api_key_ref=DEEPSEEK_API_KEY"

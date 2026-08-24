@@ -11,6 +11,7 @@
 
 # --- 标准库 ---
 import logging
+from typing import Any
 
 # --- 本地模块 ---
 from app.agent.state import AgentState
@@ -31,7 +32,7 @@ async def _load_context(state: AgentState) -> str:
     return ctx.context_text
 
 
-async def load_memory_node(state: AgentState) -> dict[str, str]:
+async def load_memory_node(state: AgentState) -> dict[str, Any]:
     """注入工作记忆与相关情景（置于改写前，07 E-05 trace 断言点）。
 
     遗留锚点（10.4 F4 SSE 联调收口）：03 §3.4 updates 样例要求本节点
@@ -49,7 +50,8 @@ async def load_memory_node(state: AgentState) -> dict[str, str]:
         context_text = await _load_context(state)
     except Exception as exc:  # noqa: BLE001 - D5：记忆故障不阻塞主链路
         logger.warning("load_memory 注入失败，原样放行: %s", exc)
-        return {}
+        # E-09：记忆层故障 → no-memory 降级原因上报（9.1）
+        return {"degraded_reasons": ["no-memory"]}
     if not context_text:
         return {}
     return {"query": f"{context_text}\n\n{state.get('query', '')}"}

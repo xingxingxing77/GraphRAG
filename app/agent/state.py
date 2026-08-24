@@ -24,6 +24,25 @@ from app.core.models import (
 )
 
 
+def merge_degraded_reasons(left: list[str], right: list[str]) -> list[str]:
+    """degraded_reasons 通道 reducer：并集去重（保持首次出现序）。
+
+    Args:
+        left: 已有原因列表。
+        right: 节点增量上报的原因。
+
+    Returns:
+        合并后的去重列表（02 §2.4 七枚举子集）。
+    """
+    seen = set(left)
+    merged = list(left)
+    for reason in right:
+        if reason not in seen:
+            seen.add(reason)
+            merged.append(reason)
+    return merged
+
+
 class AgentState(TypedDict):
     """Agent 工作记忆状态（架构 §3.4 字段表落地）。
 
@@ -49,6 +68,8 @@ class AgentState(TypedDict):
         citations: 引用列表。
         token_usage: 全程用量（每次 LLM 调用追加）。
         degraded: 是否降级运行（透传至 values 与 X-Degraded）。
+        degraded_reasons: 降级原因列表（02 §2.4 七枚举子集，9.1）：
+            各节点降级点上报，values 终态透传 X-Degraded 响应头。
         token_budget_exhausted: ★ B4 预算感知调度开关——wall-clock/token
             任一预算耗尽即置位，路由直入 Generator 降级作答。
         tool_call_cache: E3 run 内工具调用记忆化缓存，key 为
@@ -75,6 +96,7 @@ class AgentState(TypedDict):
     citations: list[Citation]
     token_usage: list[TokenUsage]
     degraded: bool
+    degraded_reasons: Annotated[list[str], merge_degraded_reasons]
     token_budget_exhausted: bool  # ★
     tool_call_cache: dict[str, RetrievalResult]
     reflect_feedback: ReflectFeedback | None

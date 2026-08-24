@@ -380,6 +380,7 @@ PlanStep 约定：
 | citations | list[Citation] | 引用列表 |
 | token_usage | list[TokenUsage] | 全程用量 |
 | degraded | bool | 是否降级运行 |
+| degraded_reasons | Annotated[list[str], 并集去重 reducer] | 降级原因列表（02 §2.4 七枚举子集，9.1）：各节点降级点上报，values 终态透传 X-Degraded 响应头 |
 | token_budget_exhausted | bool ★ | B4 预算感知调度开关——wall-clock/token 任一预算耗尽即置位，路由直入 Generator 降级作答 |
 | tool_call_cache | dict[str, RetrievalResult] | E3 run 内工具调用记忆化缓存，key 为 (tool, query) 规范 hash，防止重复检索 |
 | reflect_feedback | ReflectFeedback \| None | Reflector 结构化输出，回环时 Planner 增量补计划的依据 |

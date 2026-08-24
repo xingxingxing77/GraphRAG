@@ -162,6 +162,7 @@ async def generator_node(state: AgentState) -> dict[str, Any]:
             "answer": _FALLBACK_ANSWER,
             "citations": [],
             "degraded": True,
+            "degraded_reasons": ["llm-fallback"],
         }
 
     # 引用校验（E-03：无效编号剔除）+ Citation 列表按 E1 序重编

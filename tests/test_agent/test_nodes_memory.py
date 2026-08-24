@@ -77,8 +77,10 @@ class TestLoadMemoryNode:
             raise RuntimeError("memory down")
 
         monkeypatch.setattr(stack.scheduler, "build_context", boom)
-        # D5：注入失败原样放行，不抛错
-        assert await lm.load_memory_node({"query": "q", "session_id": "s"}) == {}
+        # D5：注入失败原样放行，不抛错；上报 no-memory 降级原因（9.1/E-09）
+        assert await lm.load_memory_node({"query": "q", "session_id": "s"}) == {
+            "degraded_reasons": ["no-memory"]
+        }
 
 
 class TestWriteBackNode:

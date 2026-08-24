@@ -94,6 +94,16 @@ def create_app() -> FastAPI:
         expose_headers=["X-Degraded"],
     )
 
+    # 全局限流（单元 9.2，D6）：默认关闭，生产经 RATE_LIMIT_ENABLED 开启
+    if settings.rate_limit_enabled:
+        from app.api.middleware import RateLimitMiddleware
+
+        app.add_middleware(
+            RateLimitMiddleware,
+            max_requests=settings.rate_limit_max_requests,
+            window_seconds=settings.rate_limit_window_seconds,
+        )
+
     # --- 统一错误体（02 §2.3 {code, message, detail}） ---
     @app.exception_handler(ApiError)
     async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:

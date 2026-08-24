@@ -77,6 +77,10 @@ MYPY_TARGETS = [
     "app/reranking/context_compressor.py",
     "app/postprocessing",
     "app/api/endpoints/golden.py",
+    "app/api/rate_limit.py",
+    "app/api/security.py",
+    "app/api/middleware.py",
+    "app/api/degraded.py",
 ]
 
 
