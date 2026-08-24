@@ -24,8 +24,9 @@ export interface paths {
          *         TokenResponse: access_token + 有效期 + 用户信息。
          *
          *     Raises:
-         *         HTTPException: AUTH_400_BAD_CREDENTIALS（凭证错误）/
-         *             AUTH_401_INVALID_API_KEY / AUTH_429_RATE_LIMITED（兑换限流更严）。
+         *         ApiError: AUTH_400_BAD_CREDENTIALS（密码错误）/
+         *             AUTH_401_INVALID_API_KEY（Key 无效）/
+         *             AUTH_400_BAD_CREDENTIALS（grant_type 与凭证不匹配）。
          */
         post: operations["issue_token_api_v1_auth_token_post"];
         delete?: never;
@@ -43,13 +44,14 @@ export interface paths {
         };
         /**
          * List Sessions
-         * @description 当前用户会话列表（游标分页）。
+         * @description 当前用户会话列表（游标分页，仅本人）。
          *
          *     title 为该会话首条用户消息截断（≤30 字符）。
          *
          *     Args:
          *         cursor: 分页游标。
          *         limit: 每页数量。
+         *         user: JWT 用户声明。
          *
          *     Returns:
          *         Paged[SessionSummary]: 会话摘要列表。
@@ -72,18 +74,19 @@ export interface paths {
         };
         /**
          * Get Session Messages
-         * @description 会话历史消息（聚合 thread checkpoint 与工作记忆）。
+         * @description 会话历史消息（归属校验，他人会话 404）。
          *
          *     Args:
          *         session_id: 会话 ID。
          *         cursor: 分页游标。
          *         limit: 每页数量（默认 50）。
+         *         user: JWT 用户声明。
          *
          *     Returns:
          *         Paged[SessionMessage]: 历史消息列表。
          *
          *     Raises:
-         *         HTTPException: SESSION_404_NOT_FOUND（不存在或非本人，他人返回 404）。
+         *         ApiError: SESSION_404_NOT_FOUND（不存在或非本人）。
          */
         get: operations["get_session_messages_api_v1_sessions__session_id__messages_get"];
         put?: never;
@@ -106,16 +109,20 @@ export interface paths {
         post?: never;
         /**
          * Delete Session
-         * @description 删除会话及其记忆。
+         * @description 删除会话及其记忆（归属校验）。
          *
-         *     行为：删除 thread checkpoint + 工作记忆 List + 该 session 的
-         *     情景记忆 points（异步级联，A-05）。
+         *     级联清理 checkpoint / wm / episodic 随 10.3/10.4 接线（A-05）。
          *
          *     Args:
          *         session_id: 会话 ID。
+         *         response: 响应对象（204 无内容）。
+         *         user: JWT 用户声明。
+         *
+         *     Returns:
+         *         204 响应。
          *
          *     Raises:
-         *         HTTPException: SESSION_404_NOT_FOUND。
+         *         ApiError: SESSION_404_NOT_FOUND。
          */
         delete: operations["delete_session_api_v1_sessions__session_id__delete"];
         options?: never;
@@ -136,14 +143,15 @@ export interface paths {
          * Submit Feedback
          * @description 上报点赞/点踩。
          *
+         *     rating=down 自动登记 bad case 回流队列（query/answer 占位取自
+         *     message_id 关联，完整答案快照随 10.3 会话存储接线补齐）。
+         *
          *     Args:
          *         request: 反馈请求（rating ∈ up|down；reason 仅 down 必填）。
+         *         user: JWT 用户声明。
          *
          *     Returns:
          *         FeedbackResponse: 受理结果。
-         *
-         *     Raises:
-         *         HTTPException: FEEDBACK_404_MESSAGE_NOT_FOUND。
          */
         post: operations["submit_feedback_api_v1_feedback_post"];
         delete?: never;
@@ -194,6 +202,9 @@ export interface paths {
         /**
          * Get Public Config
          * @description 下发公共配置（模型条目/档位/压缩策略/Profile）。
+         *
+         *     敏感字段（api_key_ref/base_url）严禁下发；Profile 由 generator
+         *     角色条目提供方判定（cloud-primary / local）。
          *
          *     Returns:
          *         PublicConfig: 前端下拉框与档位选择所需枚举。
@@ -770,10 +781,10 @@ export interface paths {
         };
         /**
          * Health Check
-         * @description 基础健康检查。
+         * @description 进程存活探针（liveness，公开）。
          *
          *     Returns:
-         *         HealthStatus: 各服务连接状态。
+         *         HealthStatus: 固定 ok。
          */
         get: operations["health_check_health_get"];
         put?: never;
@@ -793,15 +804,17 @@ export interface paths {
         };
         /**
          * Readiness Check
-         * @description 就绪检查，验证所有依赖服务的连通性。
+         * @description 依赖聚合就绪探针（readiness，公开）。
          *
          *     Args:
+         *         response: 响应对象（用于写 X-Degraded 头）。
          *         neo4j: Neo4j 客户端。
          *         qdrant: Qdrant 客户端。
          *         redis: Redis 客户端。
+         *         es: ES 客户端。
          *
          *     Returns:
-         *         HealthStatus: 各服务实际连通状态。
+         *         HealthStatus 聚合体；critical 任一 down 时 HTTP 503（02 §3.9）。
          */
         get: operations["readiness_check_ready_get"];
         put?: never;
@@ -2772,7 +2785,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HealthStatus"];
+                    "application/json": unknown;
                 };
             };
         };

@@ -81,6 +81,12 @@ MYPY_TARGETS = [
     "app/api/security.py",
     "app/api/middleware.py",
     "app/api/degraded.py",
+    "app/api/session_store.py",
+    "app/api/endpoints/auth.py",
+    "app/api/endpoints/sessions.py",
+    "app/api/endpoints/feedback.py",
+    "app/api/endpoints/config.py",
+    "app/api/endpoints/health.py",
 ]
 
 

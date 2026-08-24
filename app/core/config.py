@@ -65,8 +65,21 @@ class AppSettings(BaseSettings):
         default=None, description="Web 搜索主轨（缺省自动降级 DDG，J4）"
     )
 
+    # --- 认证凭证（单元 10.2；开发默认值，生产经 env 注入，D7/J16） ---
+    admin_username: str = Field(default="admin", description="管理员用户名（password grant）")
+    admin_password: str = Field(
+        default="admin-dev-password", description="管理员密码（开发默认，生产收紧）"
+    )
+    valid_api_keys: str = Field(
+        default="dev-api-key-0001", description="有效 API Key 列表（逗号分隔，api_key grant）"
+    )
+    token_ttl_seconds: int = Field(default=86400, description="JWT 有效期（秒）")
+
     # Ollama 配置
     ollama_base_url: str = Field(default="http://localhost:11434", description="Ollama 服务地址")
+    langgraph_server_url: str = Field(
+        default="http://localhost:8001", description="langgraph-server 地址（J19 双服务）"
+    )
     embedding_model: str = Field(default="bge-m3", description="Embedding 模型名称")
     reranker_model: str = Field(default="bge-reranker-v2-m3", description="Reranker 模型名称")
 
