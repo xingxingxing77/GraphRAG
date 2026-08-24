@@ -20,10 +20,14 @@ from app.api.deps import (
     get_es_client,
     get_neo4j_client,
     get_qdrant_client,
+    get_reranker,
 )
 from app.api.errors import ApiError, ErrorCode
 from app.api.metrics import record_retrieval_error
 from app.core.models import (
+    DebugRerankRankedItem,
+    DebugRerankRequest,
+    DebugRerankResponse,
     DebugRetrieveRequest,
     DebugRetrieveResponse,
     EmbedProbeRequest,
@@ -46,6 +50,7 @@ from app.retrieval.global_retriever import GlobalRetriever
 from app.retrieval.graph_retriever import GraphRetriever
 from app.retrieval.sparse_retriever import SparseRetriever
 from app.retrieval.web_retriever import WebRetriever
+from app.reranking.reranker import BGEReranker
 
 router = APIRouter()
 
@@ -185,3 +190,42 @@ async def debug_retrieve(
     fused_results = Deduplicator.deduplicate(fused_results, strategy="result_id")
     fused = [{"result_id": r.result_id, "content": r.content} for r in fused_results]
     return DebugRetrieveResponse(results=results, fused=fused)
+
+
+@router.post("/debug/rerank", response_model=DebugRerankResponse)
+async def debug_rerank(
+    request: DebugRerankRequest,
+    reranker: BGEReranker = Depends(get_reranker),
+) -> DebugRerankResponse:
+    """精排对比调试（02 §3.11，单元 4.1）。
+
+    FlagEmbedding 未安装/超时时自动 no-rerank 降级（degraded=true）。
+
+    Args:
+        request: 查询 + 候选文档 + top_k。
+        reranker: 精排器单例。
+
+    Returns:
+        DebugRerankResponse: 精排后列表 + 降级标志 + 耗时。
+    """
+    # TODO: admin 鉴权（10.2）
+    docs = [
+        RetrievalResult(
+            result_id=f"debug:{i}",
+            chunk_id=None,
+            content=d.content,
+            score=1.0 - i * 0.01,  # 粗排序占位分（输入顺序）
+            source=SourceKind.DENSE,
+            doc_id=None,
+            metadata={},
+        )
+        for i, d in enumerate(request.docs)
+    ]
+    start = time.perf_counter()
+    ranked = await reranker.rerank(request.query, docs, request.top_k)
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+    return DebugRerankResponse(
+        ranked=[DebugRerankRankedItem(content=d.content, score=s) for d, s in ranked],
+        degraded=reranker.last_degraded,
+        elapsed_ms=elapsed_ms,
+    )

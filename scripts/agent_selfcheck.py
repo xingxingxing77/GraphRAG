@@ -70,6 +70,10 @@ MYPY_TARGETS = [
     "app/api/metrics.py",
     "app/api/endpoints/metrics.py",
     "app/api/endpoints/debug.py",
+    "app/reranking/base.py",
+    "app/reranking/reranker.py",
+    "app/reranking/scoring.py",
+    "app/reranking/context_compressor.py",
 ]
 
 

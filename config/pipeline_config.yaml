@@ -92,6 +92,7 @@ retrieval:
   rerank_top_k: 5
   rerank_threshold: 0.3
   fusion: rrf                    # rrf | weighted
+  compression_strategy: none     # llm_extract | extractive | none (J11; deep 档默认 llm_extract)
   weights:
     dense: 0.4
     sparse: 0.2

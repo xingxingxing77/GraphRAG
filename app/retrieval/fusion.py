@@ -43,8 +43,9 @@ def _load_config() -> tuple[str, dict[str, float]]:
 
         with open(_CONFIG_PATH, encoding="utf-8") as f:
             cfg = yaml.safe_load(f) or {}
-        strategy = str((cfg.get("retrieval") or {}).get("fusion", "rrf"))
-        weights = dict(cfg.get("weights") or _DEFAULT_WEIGHTS)
+        retrieval_cfg = cfg.get("retrieval") or {}
+        strategy = str(retrieval_cfg.get("fusion", "rrf"))
+        weights = dict(retrieval_cfg.get("weights") or cfg.get("weights") or _DEFAULT_WEIGHTS)
         return strategy, {str(k): float(v) for k, v in weights.items()}
     except Exception as exc:  # noqa: BLE001 - 配置缺失用默认
         logger.warning("融合配置读取失败，使用默认: %s", exc)

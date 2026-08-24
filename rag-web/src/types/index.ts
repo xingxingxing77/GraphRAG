@@ -63,6 +63,11 @@ export type IkAnalyzeResponse = Schemas["IkAnalyzeResponse"];
 export type DebugRetrieveRequest = Schemas["DebugRetrieveRequest"];
 export type DebugRetrieveResponse = Schemas["DebugRetrieveResponse"];
 
+// 精排对比调试（02 §3.11，单元 4.1）
+export type DebugRerankRequest = Schemas["DebugRerankRequest"];
+export type DebugRerankResponse = Schemas["DebugRerankResponse"];
+export type DebugRerankRankedItem = Schemas["DebugRerankRankedItem"];
+
 /**
  * Agent 面/内部契约类型（02 §7 镜像）：不经业务面 OpenAPI，
  * 由 03/02 直接定义（R7 差异登记于 0.6 契约冻结）。禁止手改生成物，

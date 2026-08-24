@@ -622,23 +622,54 @@ export interface paths {
         put?: never;
         /**
          * Debug Retrieve
-         * @description 六路检索调试（sources 过滤 + 分组返回，单元 3.3 双路先行）。
+         * @description 六路检索调试（sources 过滤 + 分组返回 + 融合 Top-N，单元 3.5）。
          *
-         *     fused 字段待单元 3.5 接入真实融合；graph/global/fulltext/web
-         *     四路待单元 3.4 接入。当前支持 dense/sparse。
+         *     六路：dense/sparse/graph/global/fulltext/web；fused 为融合三件套
+         *     （去重 → RRF/加权融合）输出 Top-20。单路失败不阻塞其余路。
          *
          *     Args:
          *         request: 查询 + top_k + sources 过滤。
          *         qdrant: Qdrant 客户端。
+         *         neo4j: Neo4j 客户端。
+         *         es: ES 客户端。
          *         embedding: Embedding 服务。
          *
          *     Returns:
          *         DebugRetrieveResponse: 按源分组结果 + fused（当前为空）。
          *
          *     Raises:
-         *         ApiError: DEBUG_400_INVALID_SOURCE（sources 含非法/未接入源）。
+         *         ApiError: DEBUG_400_INVALID_SOURCE（sources 含非法源）。
          */
         post: operations["debug_retrieve_api_v1_admin_debug_retrieve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/debug/rerank": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Debug Rerank
+         * @description 精排对比调试（02 §3.11，单元 4.1）。
+         *
+         *     FlagEmbedding 未安装/超时时自动 no-rerank 降级（degraded=true）。
+         *
+         *     Args:
+         *         request: 查询 + 候选文档 + top_k。
+         *         reranker: 精排器单例。
+         *
+         *     Returns:
+         *         DebugRerankResponse: 精排后列表 + 降级标志 + 耗时。
+         */
+        post: operations["debug_rerank_api_v1_admin_debug_rerank_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -748,6 +779,29 @@ export interface paths {
          *         HealthStatus: 各服务实际连通状态。
          */
         get: operations["readiness_check_ready_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Metrics
+         * @description Prometheus 指标抓取端点。
+         *
+         *     Returns:
+         *         Response: text/plain 格式的指标文本（OpenMetrics 兼容）。
+         */
+        get: operations["metrics_metrics_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -956,6 +1010,74 @@ export interface components {
              * @default 0
              */
             size: number;
+        };
+        /**
+         * DebugRerankDoc
+         * @description POST /admin/debug/rerank 候选文档条目（02 §3.11，单元 4.1）。
+         *
+         *     Attributes:
+         *         content: 文档内容。
+         */
+        DebugRerankDoc: {
+            /** Content */
+            content: string;
+        };
+        /**
+         * DebugRerankRankedItem
+         * @description 精排结果条目。
+         *
+         *     Attributes:
+         *         content: 文档内容。
+         *         score: 精排分（降级时为粗排分）。
+         */
+        DebugRerankRankedItem: {
+            /** Content */
+            content: string;
+            /** Score */
+            score: number;
+        };
+        /**
+         * DebugRerankRequest
+         * @description POST /admin/debug/rerank 请求。
+         *
+         *     Attributes:
+         *         query: 查询文本。
+         *         docs: 候选文档列表。
+         *         top_k: 精排后保留数量。
+         */
+        DebugRerankRequest: {
+            /** Query */
+            query: string;
+            /** Docs */
+            docs: components["schemas"]["DebugRerankDoc"][];
+            /**
+             * Top K
+             * @default 5
+             */
+            top_k: number;
+        };
+        /**
+         * DebugRerankResponse
+         * @description POST /admin/debug/rerank 响应（精排对比）。
+         *
+         *     Attributes:
+         *         ranked: 精排后列表（按分降序）。
+         *         degraded: 是否 no-rerank 降级。
+         *         elapsed_ms: 精排耗时（毫秒）。
+         */
+        DebugRerankResponse: {
+            /** Ranked */
+            ranked?: components["schemas"]["DebugRerankRankedItem"][];
+            /**
+             * Degraded
+             * @default false
+             */
+            degraded: boolean;
+            /**
+             * Elapsed Ms
+             * @default 0
+             */
+            elapsed_ms: number;
         };
         /**
          * DebugRetrieveRequest
@@ -2457,6 +2579,39 @@ export interface operations {
             };
         };
     };
+    debug_rerank_api_v1_admin_debug_rerank_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DebugRerankRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DebugRerankResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_communities_api_v1_admin_communities_get: {
         parameters: {
             query?: {
@@ -2561,6 +2716,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthStatus"];
+                };
+            };
+        };
+    };
+    metrics_metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

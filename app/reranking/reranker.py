@@ -1,72 +1,161 @@
 """
-BGE-Reranker 精排器。
+BGE-Reranker 精排器（架构 §6.2 H1 · 05 §3.3 · 单元 4.1）。
 
-使用 BGE-Reranker-v2-m3 Cross-Encoder 对粗排结果进行精细重排序。
+bge-reranker-v2-m3 Cross-Encoder 经 FlagEmbedding 进程内加载，
+严格遵循 async 三铁律：
+1. 同步推理 run_in_executor 包裹（不阻塞事件循环）；
+2. 全局 semaphore 串行化（bulkhead，reliability.yaml = 1）；
+3. 独立超时 2s（timeouts_seconds.reranker），超时/不可用走
+   no-rerank 降级：返回原序粗排分数（D5，X-Degraded: no-rerank，E-08）。
 """
 
 # --- 标准库 ---
-from typing import Optional
+import asyncio
+import logging
+from typing import Any, Callable, Optional
 
 # --- 本地模块 ---
-from app.retrieval.dense_retriever import RetrievalResult
+from app.api.metrics import record_degraded
+from app.core.models import RetrievalResult
+from app.reranking.base import RerankerService
+
+logger = logging.getLogger(__name__)
+
+# 全局 semaphore（铁律 2：与 LLM 共享显存，串行化 bulkhead）
+_RERANK_SEM = asyncio.Semaphore(1)
+
+# 独立超时（reliability.yaml timeouts_seconds.reranker）
+_RERANK_TIMEOUT_S = 2.0
 
 
-class BGEReranker:
-    """BGE-Reranker 精排器。
+class BGEReranker(RerankerService):
+    """BGE-Reranker 精排器（Cross-Encoder 查询-文档对打分）。
 
-    使用 Cross-Encoder 模型对 (query, passage) 对进行相关性打分，
-    实现精细化的检索结果重排序。
+    Attributes:
+        model_name: Reranker 模型标识（HF 仓库名或本地路径）。
+        degraded_count: 降级次数计数（可观测数据源）。
+        last_degraded: 最近一次调用是否降级（调试端点回显）。
     """
 
     def __init__(
         self,
-        model_name: str = "bge-reranker-v2-m3",
-        threshold: float = 0.3,
-        top_k: int = 5,
+        model_name: str = "BAAI/bge-reranker-v2-m3",
+        timeout_s: float = _RERANK_TIMEOUT_S,
+        score_fn: Optional[Callable[[list[list[str]]], list[float]]] = None,
     ) -> None:
-        """初始化 Reranker。
+        """初始化 Reranker（模型惰性加载）。
 
         Args:
-            model_name: Reranker 模型名称。
-            threshold: 相关性分数阈值，低于此分数的结果将被过滤。
-            top_k: 精排后保留的结果数量。
+            model_name: Reranker 模型标识。
+            timeout_s: 独立超时（秒），超时走 no-rerank 降级。
+            score_fn: 注入的同步打分函数（测试替身），签名
+                pairs -> scores；为 None 时走 FlagEmbedding。
         """
         self.model_name = model_name
-        self.threshold = threshold
-        self.top_k = top_k
+        self.timeout_s = timeout_s
+        self._score_fn = score_fn
+        self._model: Any = None
+        self.degraded_count = 0
+        self.last_degraded = False
 
     async def rerank(
         self,
         query: str,
-        results: list[RetrievalResult],
-    ) -> list[RetrievalResult]:
-        """对检索结果进行重排序。
+        docs: list[RetrievalResult],
+        top_k: int,
+    ) -> list[tuple[RetrievalResult, float]]:
+        """对候选证据精排（超时/不可用降级粗排原序）。
 
         Args:
-            query: 用户查询文本。
-            results: 粗排后的检索结果列表。
+            query: 查询文本。
+            docs: 融合层粗排 Top-N 候选。
+            top_k: 精排后保留数量。
 
         Returns:
-            精排后的结果列表，已过滤低分结果并截断到 top_k。
+            (结果, 精排分) 列表，按精排分降序，长度 ≤ top_k；
+            降级时返回原序粗排分数。
         """
-        # TODO: 构建 (query, passage) pairs
-        # TODO: 调用 BGE-Reranker 模型打分
-        # TODO: 按分数降序排列
-        # TODO: 过滤 score < threshold 的结果
-        # TODO: 截断到 top_k 并返回
-        raise NotImplementedError
+        self.last_degraded = False
+        if not docs:
+            return []
+        pairs = [[query, d.content] for d in docs]
+        async with _RERANK_SEM:
+            try:
+                scores = await asyncio.wait_for(
+                    self._score(pairs), timeout=self.timeout_s
+                )
+            except Exception as exc:  # noqa: BLE001 - 含超时，D5 降级
+                logger.warning("rerank 降级（no-rerank）: %s", exc)
+                return self._degrade(docs, top_k)
+        ranked = sorted(zip(docs, scores), key=lambda x: -x[1])
+        return ranked[:top_k]
 
-    async def _compute_scores(
-        self,
-        pairs: list[list[str]],
-    ) -> list[float]:
-        """计算 (query, passage) 对的相关性分数。
+    async def _score(self, pairs: list[list[str]]) -> list[float]:
+        """打分调度（铁律 1：同步推理经 executor 包裹）。
 
         Args:
-            pairs: [[query, passage1], [query, passage2], ...] 格式的 pair 列表。
+            pairs: [[query, passage], ...] 对列表。
 
         Returns:
-            每个 pair 的相关性分数列表。
+            每对的相关性分数。
         """
-        # TODO: 通过 Ollama API 或 FlagEmbedding 库计算分数
-        raise NotImplementedError
+        if self._score_fn is not None:
+            return [float(s) for s in await asyncio.to_thread(self._score_fn, pairs)]
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._score_sync, pairs)
+
+    def _score_sync(self, pairs: list[list[str]]) -> list[float]:
+        """FlagEmbedding 同步打分（executor 线程内执行）。
+
+        Args:
+            pairs: [[query, passage], ...] 对列表。
+
+        Returns:
+            归一化后的相关性分数（sigmoid，[0,1]）。
+
+        Raises:
+            RuntimeError: FlagEmbedding 未安装或模型加载失败。
+        """
+        model = self._ensure_model()
+        raw = model.compute_score(pairs, normalize=True)
+        if isinstance(raw, (int, float)):
+            raw = [raw]
+        return [float(s) for s in raw]
+
+    def _ensure_model(self) -> Any:
+        """惰性加载 FlagReranker（依赖缺失抛明确错误供降级决策）。
+
+        Returns:
+            已加载的 FlagReranker 实例。
+
+        Raises:
+            RuntimeError: 依赖未安装或模型加载失败。
+        """
+        if self._model is not None:
+            return self._model
+        try:
+            from FlagEmbedding import FlagReranker  # 延迟导入（可选依赖）
+        except ImportError as exc:
+            raise RuntimeError("FlagEmbedding 未安装（pyproject pipeline 可选组）") from exc
+        try:
+            self._model = FlagReranker(self.model_name, use_fp16=False)
+        except Exception as exc:  # noqa: BLE001 - 模型加载失败统一归因
+            raise RuntimeError(f"Reranker 模型加载失败: {exc}") from exc
+        return self._model
+
+    def _degrade(
+        self, docs: list[RetrievalResult], top_k: int
+    ) -> list[tuple[RetrievalResult, float]]:
+        """no-rerank 降级：返回原序粗排分数（D5，E-08）。
+
+        Args:
+            docs: 粗排候选。
+            top_k: 保留数量。
+
+        Returns:
+            (结果, 粗排分) 列表，原序截断。
+        """
+        self.degraded_count += 1
+        self.last_degraded = True
+        record_degraded("no-rerank")
+        return [(d, d.score) for d in docs[:top_k]]

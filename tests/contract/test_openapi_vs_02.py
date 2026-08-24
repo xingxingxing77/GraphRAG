@@ -35,6 +35,7 @@ REQUIRED_ENDPOINTS: set[tuple[str, str]] = {
     ("GET", "/api/v1/admin/qdrant/points"),  # 单元 3.1
     ("POST", "/api/v1/admin/debug/analyze"),  # 单元 3.2
     ("POST", "/api/v1/admin/debug/retrieve"),  # 单元 3.3-3.5
+    ("POST", "/api/v1/admin/debug/rerank"),  # 单元 4.1
     ("GET", "/health"),
     ("GET", "/ready"),
     ("GET", "/metrics"),  # 单元 3.6

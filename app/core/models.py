@@ -255,6 +255,56 @@ class DebugRetrieveResponse(BaseModel):
     fused: list[dict[str, str]] = Field(default_factory=list)
 
 
+class DebugRerankDoc(BaseModel):
+    """POST /admin/debug/rerank 候选文档条目（02 §3.11，单元 4.1）。
+
+    Attributes:
+        content: 文档内容。
+    """
+
+    content: str = Field(..., min_length=1)
+
+
+class DebugRerankRequest(BaseModel):
+    """POST /admin/debug/rerank 请求。
+
+    Attributes:
+        query: 查询文本。
+        docs: 候选文档列表。
+        top_k: 精排后保留数量。
+    """
+
+    query: str = Field(..., min_length=1)
+    docs: list[DebugRerankDoc] = Field(..., min_length=1)
+    top_k: int = Field(default=5, ge=1, le=50)
+
+
+class DebugRerankRankedItem(BaseModel):
+    """精排结果条目。
+
+    Attributes:
+        content: 文档内容。
+        score: 精排分（降级时为粗排分）。
+    """
+
+    content: str
+    score: float
+
+
+class DebugRerankResponse(BaseModel):
+    """POST /admin/debug/rerank 响应（精排对比）。
+
+    Attributes:
+        ranked: 精排后列表（按分降序）。
+        degraded: 是否 no-rerank 降级。
+        elapsed_ms: 精排耗时（毫秒）。
+    """
+
+    ranked: list[DebugRerankRankedItem] = Field(default_factory=list)
+    degraded: bool = False
+    elapsed_ms: int = 0
+
+
 class ResolvedEntity(BaseModel):
     """实体对齐结果（P7-G2 实体规范化与对齐，单元 2.4）。
 

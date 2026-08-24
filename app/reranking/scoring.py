@@ -1,11 +1,11 @@
 """
-分数计算与排序工具。
+分数计算与排序工具（架构 L5 · 单元 4.2）。
 
-提供 Reranker 相关的分数计算和排序辅助函数。
+提供 Reranker 相关的分数计算、排序与证据选择辅助函数。
 """
 
 # --- 本地模块 ---
-from app.retrieval.dense_retriever import RetrievalResult
+from app.core.models import RetrievalResult
 
 
 def sort_by_score(results: list[RetrievalResult], descending: bool = True) -> list[RetrievalResult]:
@@ -48,3 +48,24 @@ def filter_by_threshold(
         过滤后的结果列表。
     """
     return [r for r in results if r.score >= threshold]
+
+
+def select_evidence(
+    reranked: list[tuple[RetrievalResult, float]],
+    threshold: float,
+    top_k: int,
+) -> list[tuple[RetrievalResult, float]]:
+    """证据选择编排（架构工作流：阈值过滤 → Top-K 截断，单元 4.2）。
+
+    准出口径：送入 Agent 的证据数量 ≤ Top-K 且含分数。
+
+    Args:
+        reranked: 精排输出 (结果, 精排分) 列表（已降序）。
+        threshold: 分数阈值（score ≥ threshold 保留，边界含）。
+        top_k: 截断数量。
+
+    Returns:
+        过滤并截断后的 (结果, 分) 列表。
+    """
+    kept = [(d, s) for d, s in reranked if s >= threshold]
+    return kept[:top_k]

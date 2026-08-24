@@ -24,6 +24,7 @@ from app.embedding.service import BgeM3EmbeddingService
 from app.pipeline.config import load_pipeline_config
 from app.pipeline.ingestion.manifest import JsonFileManifestStore
 from app.pipeline.ingestion.service import IngestionService
+from app.reranking.reranker import BGEReranker
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -80,6 +81,21 @@ async def get_es_client() -> AsyncGenerator[ESClient, None]:
 
 
 _es_client: ESClient | None = None
+
+
+async def get_reranker() -> AsyncGenerator[BGEReranker, None]:
+    """获取 Reranker 单例（依赖注入，模型惰性加载复用）。
+
+    Yields:
+        BGEReranker: 精排器实例。
+    """
+    global _reranker
+    if _reranker is None:
+        _reranker = BGEReranker()
+    yield _reranker
+
+
+_reranker: BGEReranker | None = None
 
 
 async def get_redis_client() -> AsyncGenerator[RedisClient, None]:

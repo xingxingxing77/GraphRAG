@@ -12,10 +12,12 @@ import { ChunkBoundaryViewer } from "@/components/ChunkBoundaryViewer";
 import { CleaningDiffCard } from "@/components/CleaningDiffCard";
 import { CommunitySummaryBrowser } from "@/components/CommunitySummaryBrowser";
 import { EmbeddingProbeCard } from "@/components/EmbeddingProbeCard";
+import { HotReloadDemoCard } from "@/components/HotReloadDemoCard";
 import { IkAnalyzePlayground } from "@/components/IkAnalyzePlayground";
 import { IngestionPanel } from "@/components/IngestionPanel";
 import { ParsingPreviewPanel } from "@/components/ParsingPreviewPanel";
 import { PointInspector } from "@/components/PointInspector";
+import { RerankCompareView } from "@/components/RerankCompareView";
 import { RetrievalDebugConsole } from "@/components/RetrievalDebugConsole";
 import { getReady } from "@/api/health";
 import type { HealthComponent, ReadyResponse } from "@/api/health";
@@ -200,7 +202,8 @@ export default function AdminPage() {
               <PointInspector />
               <IkAnalyzePlayground />
               <RetrievalDebugConsole />
-              <Pending text="RerankCompareView(4.1) / HotReloadDemoCard(4.2)…" />
+              <RerankCompareView />
+              <HotReloadDemoCard />
             </div>
           </div>
         ) : null}
