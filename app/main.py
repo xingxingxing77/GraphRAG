@@ -7,6 +7,8 @@ FastAPI 应用入口（业务面 :8000，J19）。
 """
 
 # --- 标准库 ---
+import logging
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -31,11 +33,15 @@ from app.api.endpoints import (
     graph,
     health,
     ingestion,
+    metrics,
     parsing,
+    qdrant_debug,
     sessions,
 )
 from app.api.errors import ApiError, ErrorCode
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -48,7 +54,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Yields:
         None
     """
-    # TODO: 初始化 Neo4j 驱动、Qdrant 客户端、Redis 客户端
+    # LangSmith 接入（单元 3.6）：env 驱动，密钥就绪后 trace 回放生效
+    tracing = os.environ.get("LANGCHAIN_TRACING_V2", "false").lower() in ("1", "true")
+    logger.info(
+        "LangSmith tracing: %s（密钥就绪后自动生效，遗留登记见 10.x）",
+        "on" if tracing else "off",
+    )
+    # TODO: 初始化 Neo4j 驱动、Qdrant 客户端、Redis 客户端（10.1）
     # TODO: 初始化 ES 客户端与 Postgres checkpoint 连接
     # TODO: 初始化 Embedding 服务与 LLM 注册表（fail-fast，05 §6）
     yield
@@ -137,7 +149,9 @@ def create_app() -> FastAPI:
     app.include_router(chunking.router, prefix="/api/v1/admin", tags=["admin"])
     app.include_router(debug.router, prefix="/api/v1/admin", tags=["admin"])
     app.include_router(communities.router, prefix="/api/v1/admin", tags=["admin"])
+    app.include_router(qdrant_debug.router, prefix="/api/v1/admin", tags=["admin"])
     app.include_router(health.router, tags=["health"])
+    app.include_router(metrics.router, tags=["metrics"])  # 单元 3.6，服务根路径
 
     return app
 

@@ -26,9 +26,11 @@ class BaseRetriever(Protocol):
 
     Attributes:
         name: 检索来源（SourceKind 枚举成员）。
+        error_count: 失败计数器（可观测 rag_retrieval_errors_total 数据源）。
     """
 
     name: SourceKind
+    error_count: int
 
     async def retrieve(
         self,

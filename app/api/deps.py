@@ -7,7 +7,7 @@
 # --- 标准库 ---
 from functools import lru_cache
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 # --- 第三方库 ---
 from langgraph.graph.state import CompiledStateGraph
@@ -15,6 +15,7 @@ from langgraph.graph.state import CompiledStateGraph
 # --- 本地模块 ---
 from app.core.config import AppSettings, get_settings
 from app.db.neo4j_client import Neo4jClient
+from app.db.es_client import ESClient
 from app.db.qdrant_client import QdrantDBClient
 from app.db.redis_client import RedisClient
 from app.embedding.base import EmbeddingService
@@ -48,13 +49,37 @@ _neo4j_client: Neo4jClient | None = None
 
 
 async def get_qdrant_client() -> AsyncGenerator[QdrantDBClient, None]:
-    """获取 Qdrant 客户端实例（依赖注入）。
+    """获取 Qdrant 客户端实例（依赖注入，单例复用）。
 
     Yields:
-        QdrantDBClient: 已连接的 Qdrant 客户端。
+        QdrantDBClient: 已配置的 Qdrant 客户端。
     """
-    # TODO: 创建并 yield Qdrant 客户端，确保关闭
-    raise NotImplementedError
+    global _qdrant_client
+    if _qdrant_client is None:
+        settings = get_settings()
+        _qdrant_client = QdrantDBClient(
+            host=settings.qdrant_host, port=settings.qdrant_port
+        )
+    yield _qdrant_client
+
+
+_qdrant_client: QdrantDBClient | None = None
+
+
+async def get_es_client() -> AsyncGenerator[ESClient, None]:
+    """获取 ES 客户端实例（依赖注入，单例复用）。
+
+    Yields:
+        ESClient: 已配置的 ES 客户端。
+    """
+    global _es_client
+    if _es_client is None:
+        settings = get_settings()
+        _es_client = ESClient(host=settings.elasticsearch_host)
+    yield _es_client
+
+
+_es_client: ESClient | None = None
 
 
 async def get_redis_client() -> AsyncGenerator[RedisClient, None]:
@@ -91,7 +116,7 @@ async def get_embedding_service() -> EmbeddingService:
 _embedding_service: BgeM3EmbeddingService | None = None
 
 
-async def get_agent() -> CompiledStateGraph:
+async def get_agent() -> "CompiledStateGraph[Any]":
     """获取编译后的 LangGraph Agent 实例（依赖注入）。
 
     Returns:

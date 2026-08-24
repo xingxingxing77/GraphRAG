@@ -32,8 +32,12 @@ REQUIRED_ENDPOINTS: set[tuple[str, str]] = {
     ("POST", "/api/v1/admin/chunking/preview"),  # 单元 2.1
     ("POST", "/api/v1/admin/debug/embed"),  # 单元 2.3
     ("GET", "/api/v1/admin/communities"),  # 单元 2.6
+    ("GET", "/api/v1/admin/qdrant/points"),  # 单元 3.1
+    ("POST", "/api/v1/admin/debug/analyze"),  # 单元 3.2
+    ("POST", "/api/v1/admin/debug/retrieve"),  # 单元 3.3-3.5
     ("GET", "/health"),
     ("GET", "/ready"),
+    ("GET", "/metrics"),  # 单元 3.6
 }
 
 # 02 §3.11 调试端点：随关联单元落地后从此集合迁入 REQUIRED_ENDPOINTS

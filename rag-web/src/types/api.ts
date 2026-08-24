@@ -581,6 +581,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/debug/analyze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ik Analyze
+         * @description IK 分词调试（封装 _analyze API）。
+         *
+         *     Args:
+         *         request: 目标索引 + 待分词文本。
+         *         es: ES 客户端。
+         *
+         *     Returns:
+         *         IkAnalyzeResponse: 分词 token 列表。
+         *
+         *     Raises:
+         *         ApiError: GRAPH_503_STORE_UNAVAILABLE（ES 不可用）。
+         */
+        post: operations["ik_analyze_api_v1_admin_debug_analyze_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/debug/retrieve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Debug Retrieve
+         * @description 六路检索调试（sources 过滤 + 分组返回，单元 3.3 双路先行）。
+         *
+         *     fused 字段待单元 3.5 接入真实融合；graph/global/fulltext/web
+         *     四路待单元 3.4 接入。当前支持 dense/sparse。
+         *
+         *     Args:
+         *         request: 查询 + top_k + sources 过滤。
+         *         qdrant: Qdrant 客户端。
+         *         embedding: Embedding 服务。
+         *
+         *     Returns:
+         *         DebugRetrieveResponse: 按源分组结果 + fused（当前为空）。
+         *
+         *     Raises:
+         *         ApiError: DEBUG_400_INVALID_SOURCE（sources 含非法/未接入源）。
+         */
+        post: operations["debug_retrieve_api_v1_admin_debug_retrieve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/communities": {
         parameters: {
             query?: never;
@@ -605,6 +669,34 @@ export interface paths {
          *         ApiError: GRAPH_503_STORE_UNAVAILABLE（Neo4j 不可用）。
          */
         get: operations["list_communities_api_v1_admin_communities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/qdrant/points": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Points
+         * @description 按 doc_id 查询全部业务集合中的 points。
+         *
+         *     Args:
+         *         doc_id: 文档 ID。
+         *         limit: 每集合返回上限。
+         *         client: Qdrant 客户端。
+         *
+         *     Returns:
+         *         QdrantPointsResponse: points 列表（含 payload）。
+         */
+        get: operations["list_points_api_v1_admin_qdrant_points_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -866,6 +958,44 @@ export interface components {
             size: number;
         };
         /**
+         * DebugRetrieveRequest
+         * @description POST /admin/debug/retrieve 请求（02 §3.11，单元 3.3-3.5）。
+         *
+         *     Attributes:
+         *         query: 查询文本。
+         *         top_k: 每路返回数量（默认 10）。
+         *         sources: 检索源过滤（六路枚举子集，缺省全选）。
+         */
+        DebugRetrieveRequest: {
+            /** Query */
+            query: string;
+            /**
+             * Top K
+             * @default 10
+             */
+            top_k: number;
+            /** Sources */
+            sources?: components["schemas"]["SourceKind"][] | null;
+        };
+        /**
+         * DebugRetrieveResponse
+         * @description POST /admin/debug/retrieve 响应（02 §7 DebugRetrieveResponse）。
+         *
+         *     Attributes:
+         *         results: 按检索源分组的结果（source -> RetrievalResult 列表）。
+         *         fused: 融合后 Top-N（result_id + content，3.5 接入）。
+         */
+        DebugRetrieveResponse: {
+            /** Results */
+            results?: {
+                [key: string]: components["schemas"]["RetrievalResult"][];
+            };
+            /** Fused */
+            fused?: {
+                [key: string]: string;
+            }[];
+        };
+        /**
          * EmbedProbeRequest
          * @description POST /admin/debug/embed 请求（02 §3.11，单元 2.3）。
          *
@@ -1041,6 +1171,35 @@ export interface components {
             reloaded?: string[];
             /** Errors */
             errors?: string[];
+        };
+        /**
+         * IkAnalyzeRequest
+         * @description POST /admin/debug/analyze 请求（02 §3.11，单元 3.2）。
+         *
+         *     Attributes:
+         *         index: 目标索引（rag_entities | rag_chunks）。
+         *         text: 待分词文本。
+         */
+        IkAnalyzeRequest: {
+            /**
+             * Index
+             * @default rag_entities
+             * @enum {string}
+             */
+            index: "rag_entities" | "rag_chunks";
+            /** Text */
+            text: string;
+        };
+        /**
+         * IkAnalyzeResponse
+         * @description POST /admin/debug/analyze 响应（IK 分词调试）。
+         *
+         *     Attributes:
+         *         tokens: 分词 token 列表。
+         */
+        IkAnalyzeResponse: {
+            /** Tokens */
+            tokens?: string[];
         };
         /**
          * IndexRebuildRequest
@@ -1238,6 +1397,72 @@ export interface components {
             profile: string;
         };
         /**
+         * QdrantPointItem
+         * @description Qdrant 点条目（02 §3.11 GET /admin/qdrant/points，单元 3.1）。
+         *
+         *     Attributes:
+         *         id: Point ID。
+         *         chunk_id: 关联块 ID（payload 同源，三方映射）。
+         *         score: 检索分数（scroll 查询时为 None）。
+         *         payload: 点负载（04 §3.1 键规范）。
+         */
+        QdrantPointItem: {
+            /** Id */
+            id: string;
+            /**
+             * Chunk Id
+             * @default
+             */
+            chunk_id: string;
+            /** Score */
+            score?: number | null;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * QdrantPointsResponse
+         * @description GET /admin/qdrant/points 响应。
+         *
+         *     Attributes:
+         *         points: 按 doc_id 过滤的点列表。
+         */
+        QdrantPointsResponse: {
+            /** Points */
+            points?: components["schemas"]["QdrantPointItem"][];
+        };
+        /**
+         * RetrievalResult
+         * @description 所有检索器（dense/sparse/graph/global/fulltext/web）的统一输出。
+         *
+         *     Attributes:
+         *         result_id: 全局唯一结果标识，融合层去重键，格式 f"{name}:{stable_hash}"。
+         *         chunk_id: 关联块 ID（图谱/Web 结果可为 None）。
+         *         content: 文本片段或子图序列化文本。
+         *         score: 原始分数（归一化前，口径见各检索器 docstring）。
+         *         source: 检索来源（六路枚举）。
+         *         doc_id: 关联父文档，支持上下文扩展。
+         *         metadata: 附加元数据（键名遵循 MetadataKeys）。
+         */
+        RetrievalResult: {
+            /** Result Id */
+            result_id: string;
+            /** Chunk Id */
+            chunk_id?: string | null;
+            /** Content */
+            content: string;
+            /** Score */
+            score: number;
+            source: components["schemas"]["SourceKind"];
+            /** Doc Id */
+            doc_id?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
          * ReviewDecisionRequest
          * @description POST /admin/review/decision 请求。
          *
@@ -1387,6 +1612,12 @@ export interface components {
              */
             updated_at: string;
         };
+        /**
+         * SourceKind
+         * @description 检索来源枚举（架构 §3.3 RetrievalResult.source 六路）。
+         * @enum {string}
+         */
+        SourceKind: "dense" | "sparse" | "graph" | "global" | "fulltext" | "web";
         /**
          * StructureNode
          * @description 文档结构树节点（P2 解析层产出）。
@@ -2160,6 +2391,72 @@ export interface operations {
             };
         };
     };
+    ik_analyze_api_v1_admin_debug_analyze_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IkAnalyzeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IkAnalyzeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    debug_retrieve_api_v1_admin_debug_retrieve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DebugRetrieveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DebugRetrieveResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_communities_api_v1_admin_communities_get: {
         parameters: {
             query?: {
@@ -2182,6 +2479,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Paged_CommunitySummaryItem_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_points_api_v1_admin_qdrant_points_get: {
+        parameters: {
+            query: {
+                /** @description 文档 ID */
+                doc_id: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QdrantPointsResponse"];
                 };
             };
             /** @description Validation Error */

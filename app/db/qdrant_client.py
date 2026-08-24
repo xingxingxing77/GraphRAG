@@ -1,30 +1,59 @@
 """
-Qdrant 向量数据库客户端封装。
+Qdrant 向量数据库客户端封装（04 §3 · 单元 3.1）。
 
-封装 Qdrant 异步客户端的初始化、Collection 管理和向量操作。
+封装 AsyncQdrantClient 的连接管理、Collection 管理与向量操作：
+- 业务集合 rag_{doc_type}：named vectors（dense 1024 Cosine + sparse Dot），
+  hnsw m=16 / ef_construct=200（04 §3.1）；
+- Point ID 由 chunk_id 确定性派生（uuid5），payload 携带 chunk_id，
+  保证幂等与 Neo4j/ES 三方映射（04 §3.1 Point ID 规范）；
+- batch upsert（batch_size=100，架构 P6）。
 """
 
 # --- 标准库 ---
+import uuid
 from typing import Any, Optional
 
 # --- 第三方库 ---
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import (
     Distance,
+    FieldCondition,
+    Filter,
+    FilterSelector,
+    HnswConfigDiff,
+    MatchValue,
     PointStruct,
-    VectorParams,
+    SparseVector,
     SparseVectorParams,
+    VectorParams,
 )
+
+# Point ID 派生命名空间（chunk_id → 确定性 UUID）
+_POINT_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "graphrag://qdrant-point")
+
+# 稀疏向量 named vector 名称（04 §3.1）
+SPARSE_VECTOR_NAME = "sparse"
+DENSE_VECTOR_NAME = "dense"
+
+
+def point_id_from_chunk_id(chunk_id: str) -> str:
+    """由 chunk_id 派生确定性 Point ID（uuid5，幂等）。
+
+    Args:
+        chunk_id: 块 ID（{doc_id}-{seq}）。
+
+    Returns:
+        UUID 字符串（同 chunk_id 恒同值）。
+    """
+    return str(uuid.uuid5(_POINT_ID_NAMESPACE, chunk_id))
 
 
 class QdrantDBClient:
     """Qdrant 异步客户端封装。
 
-    管理 Qdrant 客户端的生命周期，提供 Collection 和向量操作接口。
-
     Attributes:
         host: Qdrant 服务地址。
-        port: Qdrant gRPC 端口。
+        port: Qdrant HTTP 端口（6333）。
     """
 
     def __init__(self, host: str, port: int) -> None:
@@ -32,41 +61,61 @@ class QdrantDBClient:
 
         Args:
             host: Qdrant 服务地址。
-            port: Qdrant gRPC 端口。
+            port: Qdrant HTTP 端口。
         """
         self.host = host
         self.port = port
         self._client: Optional[AsyncQdrantClient] = None
 
     async def connect(self) -> None:
-        """建立 Qdrant 异步客户端连接。
-
-        Raises:
-            ConnectionError: 无法连接到 Qdrant。
-        """
-        # TODO: 创建 AsyncQdrantClient 实例
-        raise NotImplementedError
+        """建立 Qdrant 异步客户端连接。"""
+        if self._client is None:
+            self._client = AsyncQdrantClient(host=self.host, port=self.port)
 
     async def close(self) -> None:
         """关闭 Qdrant 客户端连接。"""
-        # TODO: 关闭 client
-        raise NotImplementedError
+        if self._client is not None:
+            await self._client.close()
+            self._client = None
 
-    async def create_collection(
+    async def _ensure_client(self) -> AsyncQdrantClient:
+        """确保客户端已连接。
+
+        Returns:
+            AsyncQdrantClient 实例。
+        """
+        if self._client is None:
+            await self.connect()
+        assert self._client is not None
+        return self._client
+
+    async def ensure_collection(
         self,
         collection_name: str,
         dense_vector_size: int = 1024,
         distance: Distance = Distance.COSINE,
     ) -> None:
-        """创建 Collection，支持密集向量和稀疏向量。
+        """创建业务 Collection（幂等，已存在则跳过）。
+
+        规格按 04 §3.1：dense 1024 Cosine + named sparse（Dot）+
+        hnsw m=16 / ef_construct=200。
 
         Args:
-            collection_name: Collection 名称。
-            dense_vector_size: 密集向量维度（BGE-M3 默认 1024）。
-            distance: 距离度量方式。
+            collection_name: Collection 名称（rag_{doc_type}）。
+            dense_vector_size: 密集向量维度（BGE-M3 = 1024）。
+            distance: 密集向量距离度量。
         """
-        # TODO: 创建 Collection 并配置密集+稀疏向量字段
-        raise NotImplementedError
+        client = await self._ensure_client()
+        if await client.collection_exists(collection_name):
+            return
+        await client.create_collection(
+            collection_name=collection_name,
+            vectors_config={
+                DENSE_VECTOR_NAME: VectorParams(size=dense_vector_size, distance=distance)
+            },
+            sparse_vectors_config={SPARSE_VECTOR_NAME: SparseVectorParams()},
+            hnsw_config=HnswConfigDiff(m=16, ef_construct=200),
+        )
 
     async def upsert_points(
         self,
@@ -74,69 +123,165 @@ class QdrantDBClient:
         points: list[PointStruct],
         batch_size: int = 100,
     ) -> None:
-        """批量写入向量点。
+        """批量写入向量点（幂等：同 point id 覆盖写）。
 
         Args:
             collection_name: Collection 名称。
             points: 要写入的点列表。
-            batch_size: 批量写入大小。
+            batch_size: 批量写入大小（架构 P6 = 100）。
         """
-        # TODO: 分批 upsert points
-        raise NotImplementedError
+        client = await self._ensure_client()
+        for i in range(0, len(points), batch_size):
+            await client.upsert(
+                collection_name=collection_name,
+                points=points[i : i + batch_size],
+            )
 
     async def search(
         self,
         collection_name: str,
         query_vector: list[float],
         top_k: int = 10,
-        filter_condition: Optional[dict[str, Any]] = None,
+        filter_condition: Optional[Filter] = None,
     ) -> list[dict[str, Any]]:
-        """密集向量相似度检索。
+        """密集向量相似度检索（named vector "dense"）。
 
         Args:
             collection_name: Collection 名称。
             query_vector: 查询向量。
             top_k: 返回数量。
-            filter_condition: 过滤条件。
+            filter_condition: 过滤条件（可选）。
 
         Returns:
-            检索结果列表，每项包含 id、score、payload。
+            检索结果列表，每项 {id, chunk_id, score, payload}；
+            score 为 Cosine 相似度原始分。
         """
-        # TODO: 执行 search 并格式化返回结果
-        raise NotImplementedError
+        client = await self._ensure_client()
+        result = await client.query_points(
+            collection_name=collection_name,
+            query=query_vector,
+            using=DENSE_VECTOR_NAME,
+            limit=top_k,
+            query_filter=filter_condition,
+            with_payload=True,
+        )
+        return self._format_hits(result.points)
 
     async def search_sparse(
         self,
         collection_name: str,
         sparse_vector: dict[int, float],
         top_k: int = 10,
+        filter_condition: Optional[Filter] = None,
     ) -> list[dict[str, Any]]:
-        """稀疏向量检索。
+        """稀疏向量检索（named vector "sparse"，Dot Product 口径）。
 
         Args:
             collection_name: Collection 名称。
-            sparse_vector: 稀疏向量，格式为 {token_id: weight}。
+            sparse_vector: 稀疏向量 {token_id: weight}。
             top_k: 返回数量。
+            filter_condition: 过滤条件（可选）。
 
         Returns:
-            检索结果列表。
+            检索结果列表，格式同 search。
         """
-        # TODO: 执行稀疏向量 search
-        raise NotImplementedError
+        client = await self._ensure_client()
+        indices = sorted(sparse_vector.keys())
+        values = [sparse_vector[i] for i in indices]
+        result = await client.query_points(
+            collection_name=collection_name,
+            query=SparseVector(indices=indices, values=values),
+            using=SPARSE_VECTOR_NAME,
+            limit=top_k,
+            query_filter=filter_condition,
+            with_payload=True,
+        )
+        return self._format_hits(result.points)
 
-    async def delete_points(
+    async def scroll_by_doc(
         self,
         collection_name: str,
-        point_ids: list[str],
-    ) -> None:
-        """删除指定点。
+        doc_id: str,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """按 doc_id 过滤滚动查询（payload 匹配，04 §7.2 删除联动同源）。
 
         Args:
             collection_name: Collection 名称。
-            point_ids: 要删除的点 ID 列表。
+            doc_id: 文档 ID。
+            limit: 返回上限。
+
+        Returns:
+            点列表，每项 {id, chunk_id, score: None, payload}。
         """
-        # TODO: 执行删除操作
-        raise NotImplementedError
+        client = await self._ensure_client()
+        flt = Filter(
+            must=[FieldCondition(key="doc_id", match=MatchValue(value=doc_id))]
+        )
+        records, _ = await client.scroll(
+            collection_name=collection_name,
+            scroll_filter=flt,
+            limit=limit,
+            with_payload=True,
+        )
+        return [
+            {
+                "id": str(r.id),
+                "chunk_id": str((r.payload or {}).get("chunk_id", "")),
+                "score": None,
+                "payload": r.payload or {},
+            }
+            for r in records
+        ]
+
+    async def delete_by_doc(self, collection_name: str, doc_id: str) -> None:
+        """按 doc_id 删除点（04 §7.2 文档删除联动）。
+
+        Args:
+            collection_name: Collection 名称。
+            doc_id: 文档 ID。
+        """
+        client = await self._ensure_client()
+        if not await client.collection_exists(collection_name):
+            return
+        flt = Filter(
+            must=[FieldCondition(key="doc_id", match=MatchValue(value=doc_id))]
+        )
+        await client.delete(
+            collection_name=collection_name,
+            points_selector=FilterSelector(filter=flt),
+        )
+
+    async def count(self, collection_name: str, doc_id: str | None = None) -> int:
+        """统计 Collection 点数（可按 doc_id 过滤）。
+
+        Args:
+            collection_name: Collection 名称。
+            doc_id: 可选文档 ID 过滤。
+
+        Returns:
+            点数量。
+        """
+        client = await self._ensure_client()
+        flt = None
+        if doc_id is not None:
+            flt = Filter(
+                must=[FieldCondition(key="doc_id", match=MatchValue(value=doc_id))]
+            )
+        result = await client.count(
+            collection_name=collection_name, count_filter=flt, exact=True
+        )
+        return int(result.count)
+
+    async def list_collections(self) -> list[str]:
+        """列出全部 Collection 名称。
+
+        Returns:
+            Collection 名称列表。
+        """
+        client = await self._ensure_client()
+        result = await client.get_collections()
+        return [c.name for c in result.collections]
 
     async def check_health(self) -> bool:
         """检查 Qdrant 连接健康状态。
@@ -144,5 +289,28 @@ class QdrantDBClient:
         Returns:
             True 表示连接正常。
         """
-        # TODO: 调用 Qdrant health check API
-        raise NotImplementedError
+        try:
+            await self.list_collections()
+            return True
+        except Exception:  # noqa: BLE001 - 健康检查不抛错
+            return False
+
+    @staticmethod
+    def _format_hits(points: list[Any]) -> list[dict[str, Any]]:
+        """格式化检索命中为统一字典结构。
+
+        Args:
+            points: query_points 返回的点列表。
+
+        Returns:
+            [{id, chunk_id, score, payload}, ...]。
+        """
+        return [
+            {
+                "id": str(p.id),
+                "chunk_id": str((p.payload or {}).get("chunk_id", "")),
+                "score": float(p.score),
+                "payload": p.payload or {},
+            }
+            for p in points
+        ]

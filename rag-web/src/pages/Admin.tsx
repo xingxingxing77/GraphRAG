@@ -12,8 +12,11 @@ import { ChunkBoundaryViewer } from "@/components/ChunkBoundaryViewer";
 import { CleaningDiffCard } from "@/components/CleaningDiffCard";
 import { CommunitySummaryBrowser } from "@/components/CommunitySummaryBrowser";
 import { EmbeddingProbeCard } from "@/components/EmbeddingProbeCard";
+import { IkAnalyzePlayground } from "@/components/IkAnalyzePlayground";
 import { IngestionPanel } from "@/components/IngestionPanel";
 import { ParsingPreviewPanel } from "@/components/ParsingPreviewPanel";
+import { PointInspector } from "@/components/PointInspector";
+import { RetrievalDebugConsole } from "@/components/RetrievalDebugConsole";
 import { getReady } from "@/api/health";
 import type { HealthComponent, ReadyResponse } from "@/api/health";
 import { useAuthStore } from "@/stores/authStore";
@@ -194,7 +197,10 @@ export default function AdminPage() {
             </div>
             <div>
               <CardHead title="检索调试台" unit="单元 3.1-4.2" />
-              <Pending text="PointInspector(3.1) / IkAnalyzePlayground(3.2) / RetrievalDebugConsole(3.3-3.5) / RerankCompareView(4.1) / HotReloadDemoCard(4.2)…" />
+              <PointInspector />
+              <IkAnalyzePlayground />
+              <RetrievalDebugConsole />
+              <Pending text="RerankCompareView(4.1) / HotReloadDemoCard(4.2)…" />
             </div>
           </div>
         ) : null}

@@ -1,99 +1,124 @@
 """
-全文索引构建器。
+全文索引构建器（ES 版，架构 J5/J6 · 11 D9 · 单元 3.2）。
 
-在 Neo4j 中创建和管理全文索引（Lucene），
-支持对实体属性进行关键词检索。
+全文检索外置 Elasticsearch（J5：Neo4j 不自建全文索引）：
+- 图谱/管道写入成功后由 es_syncer 异步同步 ES（rag_entities / rag_chunks）；
+- `_id` 裸值 = entity_id / chunk_id（与 Neo4j/Qdrant 三方一致）；
+- 同步失败入 Redis List 死信队列，admin 可重放（11 D9）。
 """
 
 # --- 标准库 ---
+import json
 import logging
 from typing import Any
 
 # --- 本地模块 ---
-from app.db.neo4j_client import Neo4jClient
+from app.db.es_client import CHUNKS_ALIAS, ENTITIES_ALIAS, ESClient
+from app.db.redis_client import RedisClient
 
 logger = logging.getLogger(__name__)
 
 
-class FullTextIndexer:
-    """全文索引构建器。
-
-    利用 Neo4j 的 Lucene 全文索引能力，
-    为实体节点属性创建全文索引，支持关键词级别的快速检索。
+class ESSyncer:
+    """ES 同步器（es_syncer，J6 写入侧）。
 
     Attributes:
-        db_client: Neo4jClient 实例。
+        es: ES 客户端。
+        redis: Redis 客户端（死信队列）。
     """
 
-    def __init__(self, db_client: Neo4jClient) -> None:
-        """初始化 FullTextIndexer。
+    def __init__(self, es: ESClient, redis: RedisClient) -> None:
+        """初始化 ES 同步器。
 
         Args:
-            db_client: Neo4jClient 实例。
+            es: ES 客户端。
+            redis: Redis 客户端（死信队列载体）。
         """
-        self.db_client = db_client
+        self.es = es
+        self.redis = redis
 
-    async def create_index(
-        self,
-        index_name: str,
-        label: str,
-        properties: list[str],
-    ) -> None:
-        """创建 Neo4j 全文索引。
-
-        在指定标签的节点上，对指定属性列表创建 Lucene 全文索引。
+    async def sync_entities(self, entities: list[dict[str, Any]]) -> int:
+        """批量同步实体文档到 rag_entities（_id = entity_id）。
 
         Args:
-            index_name: 索引名称（全局唯一）。
-            label: 节点标签（如 "Entity"、"Chunk"）。
-            properties: 需要索引的属性名列表（如 ["name", "description"]）。
+            entities: 实体文档列表，每项须含 entity_id 字段
+                （canonical_name/name/aliases/description/type/zone）。
 
-        Raises:
-            neo4j.exceptions.Neo4jError: 索引创建失败。
+        Returns:
+            成功写入条数（失败批次入死信，计 0）。
+        """
+        docs = [
+            (str(e["entity_id"]), {k: v for k, v in e.items()})
+            for e in entities
+            if e.get("entity_id")
+        ]
+        return await self._sync_batch(ENTITIES_ALIAS, docs)
 
-        Example::
+    async def sync_chunks(self, chunks: list[dict[str, Any]]) -> int:
+        """批量同步 chunk 文档到 rag_chunks（_id = chunk_id）。
 
-            await indexer.create_index(
-                index_name="entity_fulltext",
-                label="Entity",
-                properties=["name", "alias"],
+        Args:
+            chunks: chunk 文档列表，每项须含 chunk_id 字段
+                （doc_id/content/title_path/created_at）。
+
+        Returns:
+            成功写入条数（失败批次入死信，计 0）。
+        """
+        docs = [
+            (str(c["chunk_id"]), {k: v for k, v in c.items()})
+            for c in chunks
+            if c.get("chunk_id")
+        ]
+        return await self._sync_batch(CHUNKS_ALIAS, docs)
+
+    async def replay_dead_letter(self, max_items: int = 100) -> int:
+        """重放死信队列（admin 触发，FIFO 消费）。
+
+        Args:
+            max_items: 单次重放上限。
+
+        Returns:
+            成功重放的批次数；仍失败的批次重新入队。
+        """
+        replayed = 0
+        for _ in range(max_items):
+            message = await self.redis.dead_letter_pop()
+            if message is None:
+                break
+            try:
+                payload = json.loads(message)
+                alias = str(payload["alias"])
+                docs = [(str(_id), doc) for _id, doc in payload["docs"]]
+                await self.es.bulk_index(alias, docs)
+                replayed += 1
+            except Exception as exc:  # noqa: BLE001 - 重放失败回队
+                logger.warning("死信重放失败，重新入队: %s", exc)
+                await self.redis.dead_letter_push(message)
+                break
+        return replayed
+
+    async def _sync_batch(self, alias: str, docs: list[tuple[str, dict[str, Any]]]) -> int:
+        """批量同步（失败整批入死信）。
+
+        Args:
+            alias: 索引别名。
+            docs: [(_id, doc), ...]。
+
+        Returns:
+            成功写入条数。
+        """
+        if not docs:
+            return 0
+        try:
+            await self.es.ensure_indices()
+            return await self.es.bulk_index(alias, docs)
+        except Exception as exc:  # noqa: BLE001 - 同步失败入死信不阻断管道
+            logger.warning("ES 同步失败，批次入死信队列: %s", exc)
+            message = json.dumps(
+                {"alias": alias, "docs": docs}, ensure_ascii=False
             )
-        """
-        # TODO: 1. 构建 CREATE TEXT INDEX Cypher 语句
-        # TODO: 2. 调用 db_client.execute_cypher 执行
-        # TODO: 3. 等待索引上线（await index population）
-        # TODO: 4. 记录日志
-        raise NotImplementedError
-
-    async def index_entities(
-        self,
-        entities: list[dict[str, Any]],
-    ) -> None:
-        """批量索引实体到 Neo4j。
-
-        将实体数据写入 Neo4j，节点会自动被全文索引覆盖。
-
-        Args:
-            entities: 实体列表，每项至少包含 ``name`` 字段，
-                可包含其他属性（如 ``type``、``description``）。
-
-        Example::
-
-            await indexer.index_entities([
-                {"name": "清蒸鲈鱼", "type": "DISH", "description": "..."},
-                {"name": "鲈鱼", "type": "INGREDIENT"},
-            ])
-        """
-        # TODO: 1. 构建 MERGE/CREATE Cypher 语句
-        # TODO: 2. 批量执行（UNWIND + MERGE）
-        # TODO: 3. 记录日志
-        raise NotImplementedError
-
-    async def drop_index(self, index_name: str) -> None:
-        """删除指定的全文索引。
-
-        Args:
-            index_name: 要删除的索引名称。
-        """
-        # TODO: 执行 DROP INDEX Cypher
-        raise NotImplementedError
+            try:
+                await self.redis.dead_letter_push(message)
+            except Exception:  # noqa: BLE001 - Redis 也不可用时仅告警
+                logger.error("死信入队失败（Redis 不可用），批次丢失: %s", exc)
+            return 0

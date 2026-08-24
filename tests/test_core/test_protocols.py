@@ -15,6 +15,7 @@ class FakeRetriever:
     """符合 BaseRetriever 协议的最小实现。"""
 
     name = SourceKind.DENSE
+    error_count = 0
 
     async def retrieve(
         self,

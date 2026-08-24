@@ -51,6 +51,18 @@ export type EmbedProbeResponse = Schemas["EmbedProbeResponse"];
 export type CommunitySummaryItem = Schemas["CommunitySummaryItem"];
 export type PagedCommunitySummaryItem = Schemas["Paged_CommunitySummaryItem_"];
 
+// Qdrant points 查看（02 §3.11，单元 3.1）
+export type QdrantPointItem = Schemas["QdrantPointItem"];
+export type QdrantPointsResponse = Schemas["QdrantPointsResponse"];
+
+// IK 分词调试（02 §3.11，单元 3.2）
+export type IkAnalyzeRequest = Schemas["IkAnalyzeRequest"];
+export type IkAnalyzeResponse = Schemas["IkAnalyzeResponse"];
+
+// 六路检索调试（02 §3.11，单元 3.3-3.5）
+export type DebugRetrieveRequest = Schemas["DebugRetrieveRequest"];
+export type DebugRetrieveResponse = Schemas["DebugRetrieveResponse"];
+
 /**
  * Agent 面/内部契约类型（02 §7 镜像）：不经业务面 OpenAPI，
  * 由 03/02 直接定义（R7 差异登记于 0.6 契约冻结）。禁止手改生成物，
@@ -112,14 +124,6 @@ export interface AssistantMessage {
   latency_tier: Exclude<LatencyTier, "auto">;
   model: string | null;
   created_at: string;
-}
-
-/** 检索调试响应（02 §3.11 debug/retrieve，单元 3.3-3.5 落地） */
-export interface DebugRetrieveResponse {
-  results: Partial<
-    Record<SourceKind, { result_id: string; content: string; score: number; doc_id: string | null }[]>
-  >;
-  fused: { result_id: string; content: string }[];
 }
 
 /** 降级原因（与 02 §2.4 逐值对齐；06 §9 Banner 文案全覆盖） */

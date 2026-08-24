@@ -181,6 +181,80 @@ class CommunitySummaryItem(BaseModel):
     size: int = 0
 
 
+class QdrantPointItem(BaseModel):
+    """Qdrant 点条目（02 §3.11 GET /admin/qdrant/points，单元 3.1）。
+
+    Attributes:
+        id: Point ID。
+        chunk_id: 关联块 ID（payload 同源，三方映射）。
+        score: 检索分数（scroll 查询时为 None）。
+        payload: 点负载（04 §3.1 键规范）。
+    """
+
+    id: str
+    chunk_id: str = ""
+    score: float | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class QdrantPointsResponse(BaseModel):
+    """GET /admin/qdrant/points 响应。
+
+    Attributes:
+        points: 按 doc_id 过滤的点列表。
+    """
+
+    points: list[QdrantPointItem] = Field(default_factory=list)
+
+
+class IkAnalyzeRequest(BaseModel):
+    """POST /admin/debug/analyze 请求（02 §3.11，单元 3.2）。
+
+    Attributes:
+        index: 目标索引（rag_entities | rag_chunks）。
+        text: 待分词文本。
+    """
+
+    index: Literal["rag_entities", "rag_chunks"] = "rag_entities"
+    text: str = Field(..., min_length=1)
+
+
+class IkAnalyzeResponse(BaseModel):
+    """POST /admin/debug/analyze 响应（IK 分词调试）。
+
+    Attributes:
+        tokens: 分词 token 列表。
+    """
+
+    tokens: list[str] = Field(default_factory=list)
+
+
+class DebugRetrieveRequest(BaseModel):
+    """POST /admin/debug/retrieve 请求（02 §3.11，单元 3.3-3.5）。
+
+    Attributes:
+        query: 查询文本。
+        top_k: 每路返回数量（默认 10）。
+        sources: 检索源过滤（六路枚举子集，缺省全选）。
+    """
+
+    query: str = Field(..., min_length=1)
+    top_k: int = Field(default=10, ge=1, le=50)
+    sources: list[SourceKind] | None = None
+
+
+class DebugRetrieveResponse(BaseModel):
+    """POST /admin/debug/retrieve 响应（02 §7 DebugRetrieveResponse）。
+
+    Attributes:
+        results: 按检索源分组的结果（source -> RetrievalResult 列表）。
+        fused: 融合后 Top-N（result_id + content，3.5 接入）。
+    """
+
+    results: dict[str, list["RetrievalResult"]] = Field(default_factory=dict)
+    fused: list[dict[str, str]] = Field(default_factory=list)
+
+
 class ResolvedEntity(BaseModel):
     """实体对齐结果（P7-G2 实体规范化与对齐，单元 2.4）。
 
@@ -979,3 +1053,7 @@ class EmbedProbeResponse(BaseModel):
     dense_dims: int = 0
     sparse_keys: int = 0
     latency_ms: int = 0
+
+
+# 前向引用模型重建（RetrievalResult 定义于后，需延迟解析）
+DebugRetrieveResponse.model_rebuild()

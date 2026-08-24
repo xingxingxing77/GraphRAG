@@ -1,42 +1,95 @@
 """
-多路检索结果融合器。
+多路检索结果融合器（架构 L4 · 单元 3.5）。
 
-实现 RRF（Reciprocal Rank Fusion）和加权融合算法。
+RRF（k=60 排名融合）与加权融合双模式；策略与权重取自
+config/pipeline_config.yaml（retrieval.fusion / weights）。
+融合前各路先 min-max 归一化；跨路同文档按 chunk_id/内容哈希合并，
+输出 Top-N（默认 20）送精排。
 """
 
 # --- 标准库 ---
-from dataclasses import dataclass
+import hashlib
+import logging
+from pathlib import Path
 
 # --- 本地模块 ---
-from app.retrieval.dense_retriever import RetrievalResult
+from app.core.models import RetrievalResult
+from app.retrieval.normalizer import ScoreNormalizer
+
+logger = logging.getLogger(__name__)
+
+# 融合配置来源（pipeline_config.yaml）
+_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "pipeline_config.yaml"
+
+# 默认权重（与 pipeline_config.yaml weights 对齐）
+_DEFAULT_WEIGHTS: dict[str, float] = {
+    "dense": 0.4,
+    "sparse": 0.2,
+    "graph": 0.3,
+    "global": 0.2,
+    "fulltext": 0.2,
+    "web": 0.1,
+}
+
+
+def _load_config() -> tuple[str, dict[str, float]]:
+    """从 pipeline_config.yaml 读取融合策略与权重（失败用默认）。
+
+    Returns:
+        (strategy, weights)：strategy ∈ {"rrf", "weighted"}。
+    """
+    try:
+        import yaml
+
+        with open(_CONFIG_PATH, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        strategy = str((cfg.get("retrieval") or {}).get("fusion", "rrf"))
+        weights = dict(cfg.get("weights") or _DEFAULT_WEIGHTS)
+        return strategy, {str(k): float(v) for k, v in weights.items()}
+    except Exception as exc:  # noqa: BLE001 - 配置缺失用默认
+        logger.warning("融合配置读取失败，使用默认: %s", exc)
+        return "rrf", dict(_DEFAULT_WEIGHTS)
+
+
+def _doc_key(result: RetrievalResult) -> str:
+    """计算跨路文档合并键（chunk_id 优先，回退内容哈希）。
+
+    Args:
+        result: 检索结果。
+
+    Returns:
+        文档身份键。
+    """
+    if result.chunk_id:
+        return f"chunk:{result.chunk_id}"
+    return "content:" + hashlib.sha256(result.content.encode("utf-8")).hexdigest()[:16]
 
 
 class FusionEngine:
     """检索结果融合引擎。
 
-    支持 RRF 和加权融合两种策略，将多路检索结果合并排序。
+    Attributes:
+        strategy: 融合策略（rrf | weighted）。
+        weights: 各路权重（weighted 模式）。
+        rrf_k: RRF 常数 k（默认 60）。
     """
 
     def __init__(
         self,
-        strategy: str = "rrf",
+        strategy: str | None = None,
         weights: dict[str, float] | None = None,
         rrf_k: int = 60,
     ) -> None:
-        """初始化融合引擎。
+        """初始化融合引擎（缺省从 pipeline_config.yaml 读取）。
 
         Args:
-            strategy: 融合策略，``rrf`` 或 ``weighted``。
-            weights: 各路检索权重（weighted 策略时使用）。
-            rrf_k: RRF 算法的常数 k（默认 60）。
+            strategy: 融合策略，None 时读配置。
+            weights: 各路权重，None 时读配置。
+            rrf_k: RRF 算法常数 k（默认 60）。
         """
-        self.strategy = strategy
-        self.weights = weights or {
-            "dense": 0.4,
-            "sparse": 0.2,
-            "graph": 0.3,
-            "web": 0.1,
-        }
+        cfg_strategy, cfg_weights = _load_config()
+        self.strategy = strategy or cfg_strategy
+        self.weights = weights or cfg_weights
         self.rrf_k = rrf_k
 
     def fuse(
@@ -44,57 +97,80 @@ class FusionEngine:
         results_by_source: dict[str, list[RetrievalResult]],
         top_n: int = 20,
     ) -> list[RetrievalResult]:
-        """融合多路检索结果。
+        """融合多路检索结果（Top-N 输出送精排）。
 
         Args:
             results_by_source: 按来源分组的检索结果。
-            top_n: 融合后保留的数量。
+            top_n: 融合后保留的数量（架构：Top-20）。
 
         Returns:
             融合排序后的结果列表。
         """
-        if self.strategy == "rrf":
-            return self._rrf_fusion(results_by_source, top_n)
-        else:
+        if self.strategy == "weighted":
             return self._weighted_fusion(results_by_source, top_n)
+        return self._rrf_fusion(results_by_source, top_n)
 
     def _rrf_fusion(
         self,
         results_by_source: dict[str, list[RetrievalResult]],
         top_n: int,
     ) -> list[RetrievalResult]:
-        """Reciprocal Rank Fusion 算法。
-
-        公式: RRF_score(d) = sum(1 / (k + rank_i(d))) 对所有检索路 i
+        """Reciprocal Rank Fusion：score(d) = Σ_i 1/(k + rank_i(d))。
 
         Args:
-            results_by_source: 按来源分组的结果。
+            results_by_source: 按来源分组的结果（各路已按分数降序）。
             top_n: 保留数量。
 
         Returns:
-            RRF 排序后的结果。
+            RRF 排序后的结果（跨路同文档合并，分数为 RRF 累计）。
         """
-        # TODO: 计算每个文档在各路检索中的排名
-        # TODO: 按 RRF 公式计算综合分数
-        # TODO: 排序并返回 top_n 结果
-        raise NotImplementedError
+        accumulated: dict[str, float] = {}
+        representative: dict[str, RetrievalResult] = {}
+        for _source, results in results_by_source.items():
+            for rank, result in enumerate(results, start=1):
+                key = _doc_key(result)
+                accumulated[key] = accumulated.get(key, 0.0) + 1.0 / (
+                    self.rrf_k + rank
+                )
+                # 代表条目保留分数最高者
+                current = representative.get(key)
+                if current is None or result.score > current.score:
+                    representative[key] = result
+        ordered = sorted(accumulated.items(), key=lambda kv: -kv[1])
+        return [
+            representative[key].model_copy(update={"score": score})
+            for key, score in ordered[:top_n]
+        ]
 
     def _weighted_fusion(
         self,
         results_by_source: dict[str, list[RetrievalResult]],
         top_n: int,
     ) -> list[RetrievalResult]:
-        """加权融合算法。
+        """加权融合：score(d) = Σ_i weight_i × norm_score_i(d)。
 
-        对每路检索结果的分数乘以对应权重后求和。
+        各路先 min-max 归一化到 [0,1] 再加权求和。
 
         Args:
             results_by_source: 按来源分组的结果。
             top_n: 保留数量。
 
         Returns:
-            加权排序后的结果。
+            加权排序后的结果（跨路同文档合并）。
         """
-        # TODO: 对每个文档按权重计算加权分数
-        # TODO: 排序并返回 top_n 结果
-        raise NotImplementedError
+        accumulated: dict[str, float] = {}
+        representative: dict[str, RetrievalResult] = {}
+        for source, results in results_by_source.items():
+            weight = self.weights.get(source, 0.0)
+            normalized = ScoreNormalizer.min_max_normalize(results)
+            for result in normalized:
+                key = _doc_key(result)
+                accumulated[key] = accumulated.get(key, 0.0) + weight * result.score
+                current = representative.get(key)
+                if current is None or result.score > current.score:
+                    representative[key] = result
+        ordered = sorted(accumulated.items(), key=lambda kv: -kv[1])
+        return [
+            representative[key].model_copy(update={"score": score})
+            for key, score in ordered[:top_n]
+        ]

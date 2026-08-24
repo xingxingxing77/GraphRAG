@@ -1,11 +1,11 @@
 """
-Neo4j 图遍历检索器（架构 L3 Local Search · 04 §5.4 · 单元 3.4）。
+社区摘要检索器（架构 L3 Global Search · P7-G5 · 单元 3.4）。
 
-通过 Cypher 实体匹配 + 一跳邻域扩展获取结构化知识子图。
-实现 BaseRetriever 协议：
-- result_id = f"graph:{stable_hash}"；
+回答总结全局型问题（如"知识库覆盖哪些主题"）的唯一可行路径：
+召回 (:Community) 社区摘要。实现 BaseRetriever 协议：
+- result_id = f"global:{stable_hash}"；
 - 独立超时 + 失败降级空列表（D5）；
-- score = 图遍历启发分（匹配实体 1.0，邻域按跳数衰减，归一化前）。
+- score = 关键词命中启发分（归一化前）。
 """
 
 # --- 标准库 ---
@@ -24,32 +24,32 @@ logger = logging.getLogger(__name__)
 # 独立超时（reliability.yaml timeouts_seconds.neo4j）
 _NEO4J_TIMEOUT_S = 3.0
 
-# Local Search 一跳邻域模板（04 §5.4）
-_LOCAL_SEARCH_CYPHER = (
-    "MATCH (e:Entity) WHERE e.canonical_name CONTAINS $query "
-    "OPTIONAL MATCH (e)-[r]-(n) "
-    "RETURN e.canonical_name AS root, e.type AS root_type, "
-    "       collect(DISTINCT {rel: type(r), node: n.canonical_name, node_type: n.type}) AS neighbors "
+# Global Search：召回社区摘要（按 level 分层）
+_GLOBAL_SEARCH_CYPHER = (
+    "MATCH (m:Community) "
+    "RETURN m.community_id AS community_id, m.level AS level, "
+    "       m.summary AS summary "
+    "ORDER BY m.level DESC "
     "LIMIT $limit"
 )
 
 
-class GraphRetriever(BaseRetriever):
-    """图遍历检索器（Local Search）。
+class GlobalRetriever(BaseRetriever):
+    """社区摘要检索器（Global Search）。
 
     Attributes:
-        name: 检索来源（SourceKind.GRAPH）。
+        name: 检索来源（SourceKind.GLOBAL）。
         error_count: 失败计数器。
     """
 
-    name: SourceKind = SourceKind.GRAPH
+    name: SourceKind = SourceKind.GLOBAL
 
     def __init__(
         self,
         neo4j_client: Neo4jClient,
         timeout_s: float = _NEO4J_TIMEOUT_S,
     ) -> None:
-        """初始化图遍历检索器。
+        """初始化社区摘要检索器。
 
         Args:
             neo4j_client: Neo4j 客户端。
@@ -65,15 +65,15 @@ class GraphRetriever(BaseRetriever):
         top_k: int,
         filters: dict[str, Any] | None = None,
     ) -> list[RetrievalResult]:
-        """执行图遍历检索（超时/失败降级空列表）。
+        """执行社区摘要检索（超时/失败降级空列表）。
 
         Args:
-            query: 查询文本（作为实体匹配关键词）。
+            query: 查询文本。
             top_k: 返回数量。
             filters: 预留过滤条件。
 
         Returns:
-            检索结果列表（子图序列化文本），失败返回空列表。
+            检索结果列表（社区摘要文本），失败返回空列表。
         """
         try:
             return await asyncio.wait_for(
@@ -81,11 +81,11 @@ class GraphRetriever(BaseRetriever):
             )
         except Exception as exc:  # noqa: BLE001 - 含超时，降级空列表
             self.error_count += 1
-            logger.warning("graph 检索失败（降级空列表）: %s", exc)
+            logger.warning("global 检索失败（降级空列表）: %s", exc)
             return []
 
     async def _retrieve(self, query: str, top_k: int) -> list[RetrievalResult]:
-        """实际图遍历逻辑（实体匹配 + 一跳邻域序列化）。
+        """实际召回逻辑（社区摘要 + 关键词命中启发分）。
 
         Args:
             query: 查询文本。
@@ -95,31 +95,32 @@ class GraphRetriever(BaseRetriever):
             检索结果列表。
         """
         rows = await self.neo4j_client.execute_cypher(
-            _LOCAL_SEARCH_CYPHER, {"query": query, "limit": top_k}
+            _GLOBAL_SEARCH_CYPHER, {"limit": top_k}
         )
         hits: list[RetrievalResult] = []
+        query_tokens = set(query)
         for row in rows:
-            root = str(row.get("root") or "")
-            if not root:
+            summary = str(row.get("summary") or "")
+            if not summary:
                 continue
-            neighbors = [
-                n for n in (row.get("neighbors") or []) if n.get("node")
-            ]
-            neighbor_desc = "; ".join(
-                f"{root}-[{n.get('rel')}]->{n.get('node')}" for n in neighbors
-            )
-            content = f"实体「{root}」（{row.get('root_type') or 'Other'}）"
-            if neighbor_desc:
-                content += f"；关联：{neighbor_desc}"
+            # 关键词命中启发分（字符重合度，归一化前）
+            overlap = len(query_tokens & set(summary))
+            score = 1.0 + overlap / max(1, len(query_tokens))
+            community_id = str(row.get("community_id") or "")
             hits.append(
                 RetrievalResult(
-                    result_id=f"{self.name.value}:{stable_hash(root)}",
+                    result_id=f"{self.name.value}:{stable_hash(community_id)}",
                     chunk_id=None,
-                    content=content,
-                    score=1.0,
+                    content=summary,
+                    score=score,
                     source=self.name,
                     doc_id=None,
-                    metadata={"root": root, "neighbor_count": len(neighbors)},
+                    metadata={
+                        "community_id": community_id,
+                        "level": int(row.get("level") or 0),
+                        "source": "global",
+                    },
                 )
             )
+        hits.sort(key=lambda x: -x.score)
         return hits[:top_k]
