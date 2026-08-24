@@ -1,10 +1,10 @@
-"""记忆注入调度器测试（单元 8.1/8.2 S3：双闸去重 + 注入格式）。"""
+﻿"""记忆注入调度器测试（单元 8.1/8.2 S3：双闸去重 + 注入格式）。"""
 
 # --- 第三方库 ---
 import pytest
 
 # --- 本地模块 ---
-from app.memory.conversation import ConversationMemory
+from app.memory.working_memory import WorkingMemory
 from app.memory.episodic import EpisodicMemory
 from app.memory.scheduler import MemoryScheduler
 from tests.test_memory.conftest import FakeEmbedder, FakeQdrant, FakeRedis
@@ -17,7 +17,7 @@ def _wm_text() -> str:
 
 
 async def _seed_working_memory(scheduler: MemoryScheduler) -> None:
-    await scheduler.conversation.add_exchange("s-cur", WM_QA[0], WM_QA[1])
+    await scheduler.working_memory.add_exchange("s-cur", WM_QA[0], WM_QA[1])
 
 
 def _make_scheduler(
@@ -26,7 +26,7 @@ def _make_scheduler(
     embedder = FakeEmbedder(dim=2, overrides=overrides)
     episodic = EpisodicMemory(FakeQdrant(), embedder)
     scheduler = MemoryScheduler(
-        ConversationMemory(FakeRedis()),
+        WorkingMemory(FakeRedis()),
         episodic,
         embedder,
         working_turns=6,
@@ -91,12 +91,12 @@ class TestContextFormat:
     async def test_working_turns_window_respected(self) -> None:
         embedder = FakeEmbedder()
         scheduler = MemoryScheduler(
-            ConversationMemory(FakeRedis()),
+            WorkingMemory(FakeRedis()),
             EpisodicMemory(FakeQdrant(), embedder),
             embedder,
             working_turns=2,
         )
-        conv = scheduler.conversation
+        conv = scheduler.working_memory
         for i in range(4):
             await conv.add_exchange("s-cur", f"q{i}", f"a{i}")
         ctx = await scheduler.build_context("u1", "s-cur", "当前问题")

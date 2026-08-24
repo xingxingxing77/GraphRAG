@@ -21,7 +21,7 @@ from app.db.redis_client import RedisClient
 from app.embedding.base import EmbeddingService
 from app.embedding.ollama_client import OllamaClient
 from app.embedding.service import BgeM3EmbeddingService
-from app.memory.conversation import ConversationMemory
+from app.memory.working_memory import WorkingMemory
 from app.memory.episodic import EpisodicMemory
 from app.memory.scheduler import MemoryScheduler
 from app.memory.semantic_cache import SemanticCache
@@ -189,7 +189,7 @@ class MemoryStack:
     Attributes:
         redis: Redis 客户端。
         qdrant: Qdrant 客户端。
-        conversation: 工作记忆。
+        working_memory: 工作记忆。
         episodic: 情景记忆。
         scheduler: 注入调度器。
         semantic_cache: 语义缓存（L1 ANN + L2 Redis）。
@@ -199,20 +199,56 @@ class MemoryStack:
         self,
         redis: RedisClient,
         qdrant: QdrantDBClient,
-        conversation: "ConversationMemory",
+        working_memory: "WorkingMemory",
         episodic: "EpisodicMemory",
         scheduler: "MemoryScheduler",
         semantic_cache: "SemanticCache",
     ) -> None:
         self.redis = redis
         self.qdrant = qdrant
-        self.conversation = conversation
+        self.working_memory = working_memory
         self.episodic = episodic
         self.scheduler = scheduler
         self.semantic_cache = semantic_cache
 
 
 _memory_stack: MemoryStack | None = None
+
+# 记忆层策略参数（config/reliability.yaml memory 节，读取失败用默认；
+# 冷启动生效，J18 边界见 01 §7）
+_MEMORY_CFG_YAML = Path(__file__).resolve().parents[2] / "config" / "reliability.yaml"
+
+
+def _load_memory_config() -> dict[str, Any]:
+    """从 reliability.yaml 读取记忆层参数（容错回退默认值）。
+
+    Returns:
+        {l1_hit_threshold, l1_ttl_seconds, l2_ttl_seconds,
+         dedup_similarity_threshold, working_turns, wm_max_turns,
+         wm_ttl_days, episodic_top_m, episodic_retention_days,
+         summaries_cap}。
+    """
+    defaults: dict[str, Any] = {
+        "l1_hit_threshold": 0.95,
+        "l1_ttl_seconds": 3600,
+        "l2_ttl_seconds": 600,
+        "dedup_similarity_threshold": 0.92,
+        "working_turns": 6,
+        "wm_max_turns": 10,
+        "wm_ttl_days": 7,
+        "episodic_top_m": 3,
+        "episodic_retention_days": 180,
+        "summaries_cap": 20,
+    }
+    try:
+        import yaml
+
+        with open(_MEMORY_CFG_YAML, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        section = cfg.get("memory") or {}
+        return {key: type(default)(section.get(key, default)) for key, default in defaults.items()}
+    except Exception:  # noqa: BLE001 - 配置缺失/损坏用默认
+        return defaults
 
 
 async def get_memory_stack() -> MemoryStack:
@@ -224,21 +260,40 @@ async def get_memory_stack() -> MemoryStack:
     global _memory_stack
     if _memory_stack is None:
         settings = get_settings()
+        mem = _load_memory_config()
         redis = RedisClient(
             host=settings.redis_host, port=settings.redis_port, db=settings.redis_db
         )
         qdrant = QdrantDBClient(host=settings.qdrant_host, port=settings.qdrant_port)
         embedder = await get_embedding_service()
-        conversation = ConversationMemory(redis)
-        episodic = EpisodicMemory(qdrant, embedder)
-        scheduler = MemoryScheduler(conversation, episodic, embedder)
+        working_memory = WorkingMemory(
+            redis,
+            max_turns=mem["wm_max_turns"],
+            ttl_seconds=mem["wm_ttl_days"] * 86400,
+        )
+        episodic = EpisodicMemory(
+            qdrant, embedder, retention_days=mem["episodic_retention_days"]
+        )
+        scheduler = MemoryScheduler(
+            working_memory,
+            episodic,
+            embedder,
+            working_turns=mem["working_turns"],
+            episodic_top_m=mem["episodic_top_m"],
+            dedup_similarity_threshold=mem["dedup_similarity_threshold"],
+        )
         semantic_cache = SemanticCache(
-            qdrant=qdrant, embedder=embedder, redis=redis
+            qdrant=qdrant,
+            embedder=embedder,
+            redis=redis,
+            threshold=mem["l1_hit_threshold"],
+            l1_ttl_seconds=mem["l1_ttl_seconds"],
+            l2_ttl_seconds=mem["l2_ttl_seconds"],
         )
         _memory_stack = MemoryStack(
             redis=redis,
             qdrant=qdrant,
-            conversation=conversation,
+            working_memory=working_memory,
             episodic=episodic,
             scheduler=scheduler,
             semantic_cache=semantic_cache,

@@ -34,6 +34,11 @@ async def _load_context(state: AgentState) -> str:
 async def load_memory_node(state: AgentState) -> dict[str, str]:
     """注入工作记忆与相关情景（置于改写前，07 E-05 trace 断言点）。
 
+    遗留锚点（10.4 F4 SSE 联调收口）：03 §3.4 updates 样例要求本节点
+    帧载荷含计数字段 {injected_working_turns, episodic_hits,
+    dedup_removed}；当前 AgentState 无对应契约字段，仅返回注入后
+    query。补齐需加字段并与架构 §3.4 字段表 + routers 真值表同 PR。
+
     Args:
         state: 当前 Agent 状态。
 

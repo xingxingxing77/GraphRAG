@@ -1437,7 +1437,22 @@ pipeline:
       enabled: false             # E2: HITL 中断挂点(默认关闭)
 ```
 
-超时与降级参数独立存放于 `config/reliability.yaml`（含 `agent.wall_clock_budget`，见 M3 表与 7.1）。
+超时与降级参数独立存放于 `config/reliability.yaml`（含 `agent.wall_clock_budget`，见 M3 表与 7.1）。记忆层策略参数（单元 8，冷启动生效）同文件 `memory:` 节选：
+
+```yaml
+# config/reliability.yaml（memory 节选, 单元 8.1-8.3）
+memory:
+  l1_hit_threshold: 0.95            # H2: precheck ANN top-1 命中阈
+  l1_ttl_seconds: 3600              # rag_cache 应用层 TTL (Qdrant 无原生 TTL)
+  l2_ttl_seconds: 600               # l2:ret:{norm_hash} 短 TTL
+  dedup_similarity_threshold: 0.92  # 双闸闸2: 情景×工作记忆剔除阈 (05 §5.4)
+  working_turns: 6                  # load_memory 注入最近轮数
+  wm_max_turns: 10                  # wm:{sid} 滑动窗口宽度 (LTRIM)
+  wm_ttl_days: 7                    # wm Key 过期 (04 §4)
+  episodic_top_m: 3                 # 注入情景条数上限
+  episodic_retention_days: 180      # D8 情景保留期
+  summaries_cap: 20                 # 蒸馏源 List 封顶 (11 Phase 4)
+```
 
 ### 8.3 插件化的处理规则
 

@@ -51,15 +51,22 @@ class EpisodicHit(BaseModel):
 class EpisodicMemory:
     """情景记忆管理器（rag_episodic 向量化存储与相关性检索）。"""
 
-    def __init__(self, qdrant: QdrantDBClient, embedder: EmbeddingService) -> None:
+    def __init__(
+        self,
+        qdrant: QdrantDBClient,
+        embedder: EmbeddingService,
+        retention_days: int = EPISODIC_RETENTION_DAYS,
+    ) -> None:
         """初始化情景记忆。
 
         Args:
             qdrant: Qdrant 客户端。
             embedder: Embedding 服务（dense 通道）。
+            retention_days: 保留天数（D8 默认 180，可经 reliability.yaml 覆盖）。
         """
         self.qdrant = qdrant
         self.embedder = embedder
+        self.retention_days = retention_days
 
     @staticmethod
     def _point_id(session_id: str, turn_seq: int) -> str:
@@ -192,7 +199,7 @@ class EpisodicMemory:
             return await self.qdrant.delete_created_before(
                 RAG_EPISODIC_COLLECTION,
                 "timestamp",
-                current - EPISODIC_RETENTION_DAYS * 86400,
+                current - self.retention_days * 86400,
             )
         except Exception:  # noqa: BLE001 - 定时任务失败不抛出
             return 0

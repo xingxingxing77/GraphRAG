@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 # --- 本地模块 ---
 from app.embedding.base import EmbeddingService
-from app.memory.conversation import ConversationMemory
+from app.memory.working_memory import WorkingMemory
 from app.memory.episodic import EpisodicHit, EpisodicMemory
 
 # 闸 2 阈值：情景与工作记忆相似度高于该值视为重复（05 §5.4）
@@ -66,27 +66,30 @@ class MemoryScheduler:
 
     def __init__(
         self,
-        conversation: ConversationMemory,
+        working_memory: WorkingMemory,
         episodic: EpisodicMemory,
         embedder: EmbeddingService,
         *,
         working_turns: int = 6,
         episodic_top_m: int = 3,
+        dedup_similarity_threshold: float = DEDUP_SIMILARITY_THRESHOLD,
     ) -> None:
         """初始化调度器。
 
         Args:
-            conversation: 工作记忆。
+            working_memory: 工作记忆。
             episodic: 情景记忆。
             embedder: Embedding 服务（闸 2 相似度计算用）。
             working_turns: 注入的最近轮数上限。
             episodic_top_m: 注入的情景条数上限。
+            dedup_similarity_threshold: 闸 2 相似度阈（可经 reliability.yaml 覆盖）。
         """
-        self.conversation = conversation
+        self.working_memory = working_memory
         self.episodic = episodic
         self.embedder = embedder
         self.working_turns = working_turns
         self.episodic_top_m = episodic_top_m
+        self.dedup_similarity_threshold = dedup_similarity_threshold
 
     async def build_context(
         self,
@@ -104,7 +107,7 @@ class MemoryScheduler:
         Returns:
             MemoryContext: 计数与拼接后的注入文本。
         """
-        history = await self.conversation.get_history(session_id)
+        history = await self.working_memory.get_history(session_id)
         recent = history[-self.working_turns :]
 
         # --- 闸 1：工作记忆原文 hash 集合 ---
@@ -130,7 +133,7 @@ class MemoryScheduler:
                 max_sim = max(
                     (_cosine(cvec, wvec) for wvec in wm_vectors), default=0.0
                 )
-                if _text_hash(f"Q: {hit.question}\nA: {hit.answer}") in wm_hashes or max_sim > DEDUP_SIMILARITY_THRESHOLD:
+                if _text_hash(f"Q: {hit.question}\nA: {hit.answer}") in wm_hashes or max_sim > self.dedup_similarity_threshold:
                     removed += 1
                 else:
                     kept.append(hit)

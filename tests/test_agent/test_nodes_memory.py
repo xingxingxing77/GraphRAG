@@ -1,4 +1,4 @@
-"""记忆读写节点与图拓扑测试（单元 8.1/8.3 S3，07 §6 E-05 断言）。"""
+﻿"""记忆读写节点与图拓扑测试（单元 8.1/8.3 S3，07 §6 E-05 断言）。"""
 
 # --- 标准库 ---
 from typing import Any
@@ -20,7 +20,7 @@ class _FakeStack:
     """MemoryStack 测试替身（仅节点实际消费的面）。"""
 
     def __init__(self) -> None:
-        from app.memory.conversation import ConversationMemory
+        from app.memory.working_memory import WorkingMemory
         from app.memory.episodic import EpisodicMemory
         from app.memory.scheduler import MemoryScheduler
         from app.memory.semantic_cache import SemanticCache
@@ -28,9 +28,9 @@ class _FakeStack:
         embedder = FakeEmbedder()
         self.qdrant = FakeQdrant()
         self.redis = FakeRedis()
-        self.conversation = ConversationMemory(self.redis)
+        self.working_memory = WorkingMemory(self.redis)
         self.episodic = EpisodicMemory(self.qdrant, embedder)
-        self.scheduler = MemoryScheduler(self.conversation, self.episodic, embedder)
+        self.scheduler = MemoryScheduler(self.working_memory, self.episodic, embedder)
         self.semantic_cache = SemanticCache(self.qdrant, embedder, self.redis)
         self.injected: MemoryContext | None = None
 
@@ -51,7 +51,7 @@ def stack(monkeypatch: pytest.MonkeyPatch) -> _FakeStack:
 class TestLoadMemoryNode:
 
     async def test_injects_context_before_query(self, stack: _FakeStack) -> None:
-        await stack.conversation.add_exchange("s1", "鲈鱼怎么蒸", "蒸8分钟")
+        await stack.working_memory.add_exchange("s1", "鲈鱼怎么蒸", "蒸8分钟")
 
         async def fake_build(user_id: str, session_id: str, current_query: str) -> MemoryContext:
             stack.injected = MemoryContext(
@@ -96,7 +96,7 @@ class TestWriteBackNode:
             "token_usage": [],
         }
         await wb.write_back_node(state)
-        assert len(await stack.conversation.get_history("s1")) == 1
+        assert len(await stack.working_memory.get_history("s1")) == 1
         assert stack.qdrant.count("rag_episodic") == 1
         # 首轮未个性化 → L1 已回填
         assert (await stack.semantic_cache.get_l1("鲈鱼怎么蒸")).hit is True
@@ -117,7 +117,7 @@ class TestWriteBackNode:
         }
         await wb.write_back_node(dict(base, original_query="第一问", answer="答一"))
         await wb.write_back_node(dict(base, original_query="第二问", answer="答二"))
-        history = await stack.conversation.get_history("s1")
+        history = await stack.working_memory.get_history("s1")
         assert len(history) == 2
         assert stack.qdrant.count("rag_episodic") == 2
         lookup = await stack.semantic_cache.get_l1("第二问")
@@ -128,7 +128,7 @@ class TestWriteBackNode:
         await wb.write_back_node(
             {"answer": "降级答案", "session_id": "s1", "degraded": True}
         )
-        assert await stack.conversation.get_history("s1") == []
+        assert await stack.working_memory.get_history("s1") == []
         assert stack.qdrant.count("rag_episodic") == 0
 
     async def test_matched_doc_ids_extracted_from_evidence(

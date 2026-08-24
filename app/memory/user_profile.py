@@ -33,16 +33,23 @@ class UserProfile:
         summarizer: 蒸馏函数（extractor 角色 LLM 封装；None 时不可蒸馏）。
     """
 
-    def __init__(self, redis: RedisClient, summarizer: SummaryFn | None = None) -> None:
+    def __init__(
+        self,
+        redis: RedisClient,
+        summarizer: SummaryFn | None = None,
+        summaries_cap: int = SUMMARIES_CAP,
+    ) -> None:
         """初始化用户画像管理器。
 
         Args:
             redis: Redis 客户端实例。
             summarizer: 可选蒸馏函数；真实部署注入 extractor 角色
                 LLM 调用（依赖 app.llm client.chat 落地），单测注入替身。
+            summaries_cap: 蒸馏源 List 封顶条数（可经 reliability.yaml 覆盖）。
         """
         self.redis = redis
         self.summarizer = summarizer
+        self.summaries_cap = summaries_cap
 
     @staticmethod
     def _profile_key(user_id: str) -> str:
@@ -98,7 +105,7 @@ class UserProfile:
         """
         key = self._summaries_key(user_id)
         await self.redis.lpush(key, summary)
-        await self.redis.ltrim(key, 0, SUMMARIES_CAP - 1)
+        await self.redis.ltrim(key, 0, self.summaries_cap - 1)
 
     async def get_summaries(self, user_id: str) -> list[str]:
         """读取蒸馏源摘要列表（旧→新）。

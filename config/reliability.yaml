@@ -41,3 +41,15 @@ agent_budget:           # M3 循环终止预算
   self_correction_max_retries: 1
   token_budget_total: 32000
   langgraph_recursion_limit: 15
+
+memory:                 # 记忆层策略参数 (单元 8.1-8.3, 冷启动生效; 阈值语义见架构 H2/05 §5.4)
+  l1_hit_threshold: 0.95            # H2: precheck ANN top-1 命中阈
+  l1_ttl_seconds: 3600              # rag_cache 应用层 TTL (04 §3.3, Qdrant 无原生 TTL)
+  l2_ttl_seconds: 600               # l2:ret:{norm_hash} 短 TTL (04 §4)
+  dedup_similarity_threshold: 0.92  # 双闸闸2: 情景×工作记忆相似度剔除阈 (05 §5.4)
+  working_turns: 6                  # load_memory 注入的最近轮数
+  wm_max_turns: 10                  # wm:{sid} 滑动窗口宽度 (LPUSH+LTRIM)
+  wm_ttl_days: 7                    # wm Key 过期 (04 §4)
+  episodic_top_m: 3                 # 注入情景条数上限
+  episodic_retention_days: 180      # D8 情景保留期定时清理
+  summaries_cap: 20                 # 蒸馏源 List 封顶 LTRIM (11 路线图 Phase 4)

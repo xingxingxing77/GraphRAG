@@ -20,8 +20,8 @@ from app.db.redis_client import RedisClient
 WM_TTL_SECONDS = 7 * 24 * 3600
 
 
-class ConversationMemory:
-    """短期工作记忆管理器。
+class WorkingMemory:
+    """短期工作记忆管理器（架构 L9 文件清单命名：working_memory.py）。
 
     使用 Redis List 存储最近 N 轮对话（Key=`wm:{session_id}`，
     04 §4 唯一命名出处），LPUSH+LTRIM 滑动窗口 + EXPIRE 兜底。
@@ -31,15 +31,22 @@ class ConversationMemory:
         max_turns: 滑动窗口保留的最大轮数。
     """
 
-    def __init__(self, redis: RedisClient, max_turns: int = 10) -> None:
+    def __init__(
+        self,
+        redis: RedisClient,
+        max_turns: int = 10,
+        ttl_seconds: int = WM_TTL_SECONDS,
+    ) -> None:
         """初始化工作记忆。
 
         Args:
             redis: Redis 客户端实例。
             max_turns: 最大保留对话轮数（LTRIM 窗口宽度）。
+            ttl_seconds: Key 过期时间（04 §4 默认 7d，可经 reliability.yaml 覆盖）。
         """
         self.redis = redis
         self.max_turns = max_turns
+        self.ttl_seconds = ttl_seconds
 
     @staticmethod
     def _key(session_id: str) -> str:
@@ -70,7 +77,7 @@ class ConversationMemory:
         key = self._key(session_id)
         await self.redis.lpush(key, entry)
         await self.redis.ltrim(key, 0, self.max_turns - 1)
-        await self.redis.expire(key, WM_TTL_SECONDS)
+        await self.redis.expire(key, self.ttl_seconds)
 
     async def get_history(
         self,
