@@ -141,7 +141,7 @@ export type DegradedReason =
   | "budget-exhausted"
   | "no-persistence";
 
-/** Agent 图节点名（thought 聚合源，02 §7 / 03 §3.3） */
+/** Agent 图节点名（thought 聚合源，02 §7 / 03 §3.3；write_back=写侧尾节点 F4） */
 export type AgentNodeName =
   | "load_memory"
   | "query_understanding"
@@ -149,4 +149,5 @@ export type AgentNodeName =
   | "tool_router"
   | "reflector"
   | "generator"
-  | "self_correction";
+  | "self_correction"
+  | "write_back";

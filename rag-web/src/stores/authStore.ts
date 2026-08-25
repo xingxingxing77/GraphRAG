@@ -6,6 +6,7 @@
 import { create } from "zustand";
 
 import { issueToken } from "@/api/auth";
+import { bindJwt } from "@/lib/agentClient";
 import type { AuthTokenRequest, UserInfo } from "@/types";
 
 interface AuthState {
@@ -27,6 +28,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     const resp = await issueToken(grant);
     sessionStorage.setItem("rag_token", resp.access_token);
     sessionStorage.setItem("rag_user", JSON.stringify(resp.user));
+    bindJwt(resp.access_token); // SDK 直连同源 JWT（J19，06 §5）
     set({ token: resp.access_token, user: resp.user, lastGrant: grant });
   },
 
@@ -47,3 +49,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     set({ token: null, user: null });
   },
 }));
+
+// 会话恢复：刷新页面后 sessionStorage token 仍在，重绑 SDK JWT（06 §5）
+const _restored = sessionStorage.getItem("rag_token");
+if (_restored) bindJwt(_restored);

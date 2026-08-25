@@ -492,9 +492,11 @@ export type DegradedReason =
 
 // Agent 图节点名（thought 聚合源）：与 03 §3.3/§3.4 权威枚举一致；
 // 前端 summarize() 须对全部成员穷举 switch，未覆盖即 tsc 报错
+// write_back = 写侧尾节点（F4，纯副作用返回空增量，03 §3.4 样例）
 export type AgentNodeName =
   | "load_memory" | "query_understanding" | "planner"
-  | "tool_router" | "reflector" | "generator" | "self_correction";
+  | "tool_router" | "reflector" | "generator" | "self_correction"
+  | "write_back";
 ```
 
 ---
