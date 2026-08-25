@@ -3,5 +3,8 @@
   "graphs": {
     "agent": "./app/agent/graph.py:build_agent_graph"
   },
-  "env": ".env"
+  "env": ".env",
+  "auth": {
+    "path": "./app/auth_server.py:auth"
+  }
 }
