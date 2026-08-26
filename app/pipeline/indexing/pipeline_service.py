@@ -97,6 +97,42 @@ class PipelineService:
         chunks = await chunk_document(cleaned, self.chunking_cfg)
         return await enrich_chunks(chunks, raw.source_path, cleaned.quality_score)
 
+    async def clear_all(self) -> None:
+        """全量重建前置：清空三存储既有索引数据（BUG-E）。
+
+        范围：仅业务集合（Qdrant rag_* 排除 rag_cache/rag_episodic 记忆层）、
+        Neo4j Chunk/Document 节点、ES rag_chunks 全文索引；不触碰社区/实体
+        派生数据与记忆层。任一存储清空失败仅记日志继续（降级不阻断重建，
+        M3/D5）。
+        """
+        # ① Qdrant：清空业务向量集合（记忆层集合跳过）
+        try:
+            for name in await self.vector_indexer.db_client.list_collections():
+                if name.startswith("rag_") and name not in ("rag_cache", "rag_episodic"):
+                    deleted = await self.vector_indexer.db_client.clear_collection(name)
+                    logger.info("Qdrant 清空集合 %s：%d points", name, deleted)
+        except Exception as exc:  # noqa: BLE001 - 清空失败不阻断重建
+            logger.warning("Qdrant 全量清空失败: %s", exc)
+
+        # ② Neo4j：清空 Chunk / Document 节点（级联 MENTIONS/REL 边）
+        for cypher in (
+            "MATCH (c:Chunk) DETACH DELETE c",
+            "MATCH (d:Document) DETACH DELETE d",
+        ):
+            try:
+                await self.graph_writer.client.execute_cypher(cypher, {})
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Neo4j 全量清空失败（%s）: %s", cypher[:20], exc)
+
+        # ③ ES：清空 rag_chunks 全文索引
+        try:
+            from app.db.es_client import CHUNKS_ALIAS
+
+            deleted = await self.es_syncer.es.clear_alias(CHUNKS_ALIAS)
+            logger.info("ES 清空 %s：%d docs", CHUNKS_ALIAS, deleted)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ES 全量清空失败: %s", exc)
+
     async def index_documents(self, documents: list[RawDocument]) -> IndexStats:
         """对一批 RawDocument 执行管线并三索引入库。
 
@@ -121,15 +157,24 @@ class PipelineService:
             doc_type = str(
                 enriched[0].chunk.metadata.get(MetadataKeys.DOC_TYPE, "knowledge")
             )
+            # 三索引写入与 P2-P5 同属单文档容错范围：任一存储写入失败
+            # 仅记日志跳过该文档，不阻塞整批（M3/D5）。
+            try:
+                vector_points = await self.vector_indexer.index(
+                    enriched, raw.source_path, doc_type
+                )
+                await self.graph_writer.write_enriched_chunks(enriched)
+                fulltext_written = await self.es_syncer.sync_chunks(
+                    [chunk_to_es_doc(c) for c in enriched]
+                )
+            except Exception as exc:  # noqa: BLE001 - 单文档索引失败不阻塞整批
+                logger.warning("三索引入库失败（%s）: %s", raw.source_path, exc)
+                stats.failed += 1
+                continue
             stats.documents += 1
             stats.chunks += len(enriched)
-            stats.vector_points += await self.vector_indexer.index(
-                enriched, raw.source_path, doc_type
-            )
-            await self.graph_writer.write_enriched_chunks(enriched)
-            stats.fulltext_written += await self.es_syncer.sync_chunks(
-                [chunk_to_es_doc(c) for c in enriched]
-            )
+            stats.vector_points += vector_points
+            stats.fulltext_written += fulltext_written
         logger.info(
             "索引编排完成：docs=%d chunks=%d vector=%d es=%d failed=%d",
             stats.documents,

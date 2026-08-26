@@ -247,6 +247,38 @@ class QdrantDBClient:
         """
         await self.delete_by_payload_match(collection_name, "doc_id", doc_id)
 
+    async def clear_collection(self, collection_name: str) -> int:
+        """清空集合全部点（全量重建前置，BUG-E）。
+
+        Args:
+            collection_name: Collection 名称。
+
+        Returns:
+            实际删除的点数（集合不存在时返回 0）。
+        """
+        client = await self._ensure_client()
+        if not await client.collection_exists(collection_name):
+            return 0
+        deleted = 0
+        offset: Any = None
+        while True:
+            records, offset = await client.scroll(
+                collection_name=collection_name,
+                limit=500,
+                with_payload=False,
+            )
+            if not records:
+                break
+            ids = [r.id for r in records]
+            await client.delete(
+                collection_name=collection_name,
+                points_selector=PointIdsList(points=ids),
+            )
+            deleted += len(ids)
+            if offset is None:
+                break
+        return deleted
+
     async def delete_by_payload_match(
         self,
         collection_name: str,

@@ -170,6 +170,23 @@ class ESClient:
         )
         return int(resp.get("deleted", 0))
 
+    async def clear_alias(self, alias: str) -> int:
+        """清空别名下全部文档（全量重建前置，BUG-E）。
+
+        Args:
+            alias: 索引别名（rag_chunks / rag_entities）。
+
+        Returns:
+            删除条数。
+        """
+        client = await self._ensure_client()
+        resp = await client.delete_by_query(
+            index=alias,
+            query={"match_all": {}},
+            ignore_unavailable=True,
+        )
+        return int(resp.get("deleted", 0))
+
     async def delete_by_id(self, alias: str, doc_id: str) -> None:
         """按 _id 删除单条（不存在时忽略）。
 

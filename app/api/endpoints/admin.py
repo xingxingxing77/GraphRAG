@@ -147,6 +147,10 @@ async def _run_full_reindex(rec: "_TaskRecord") -> None:
             graph_writer=GraphWriter(neo, load_graph_schema()),
             es_syncer=ESSyncer(es, redis),
         )
+        # 全量重建前置：清空三存储既有索引数据，避免旧 doc/chunk 残留
+        # （BUG-E——源文档删除或 chunk_id 变化时旧的 points/节点/全文
+        # 条目不会随 upsert 被清掉，导致「全量重建」名不副实）。
+        await service.clear_all()
         stats = await service.index_documents(documents)
         audit_log.info(
             "rebuild full done docs=%d chunks=%d vector=%d es=%d failed=%d",
@@ -440,12 +444,15 @@ async def review_decision(
         # 则补写同义白名单关系（04 §5.4 升级机制）
         rels = await neo.execute_cypher(
             "MATCH (e:Entity {canonical_name: $name})-[r:REL]-(n:Entity) "
-            "RETURN type(r) AS rt, n.type AS nt, "
+            "RETURN type(r) AS rt, n.type AS nt, n.canonical_name AS nn, "
             "CASE WHEN startNode(r) = e THEN 1 ELSE 0 END AS outgoing",
             {"name": request.entity_id},
         )
         for rel in rels:
             to_type = str(rel.get("nt") or "Other")
+            to_name = str(rel.get("nn") or "")
+            if not to_name:
+                continue
             outgoing = bool(rel.get("outgoing"))
             allowed = [
                 spec.rel_type
@@ -459,13 +466,13 @@ async def review_decision(
                 await neo.execute_cypher(
                     "MATCH (a:Entity {canonical_name: $a})-[r:REL]->(b:Entity {canonical_name: $b}) "
                     f"MERGE (a)-[:{allowed[0]}]->(b)",
-                    {"a": request.entity_id, "b": str(rel.get("nt"))},
+                    {"a": request.entity_id, "b": to_name},
                 )
             else:
                 await neo.execute_cypher(
                     "MATCH (a:Entity {canonical_name: $a})<-[r:REL]-(b:Entity {canonical_name: $b}) "
                     f"MERGE (a)<-[:{allowed[0]}]-(b)",
-                    {"a": request.entity_id, "b": str(rel.get("nt"))},
+                    {"a": request.entity_id, "b": to_name},
                 )
     else:
         rows = await neo.execute_cypher(
