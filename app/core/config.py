@@ -16,6 +16,16 @@ from typing import Optional
 os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1")
 os.environ.setdefault("no_proxy", "localhost,127.0.0.1")
 
+# .env 绝对路径（app/core/config.py 的上三级 = 项目根）——
+# 相对路径会让 pydantic-settings 在实例化时调用 os.getcwd() 同步阻塞，
+# 触发 langgraph dev 的 BlockingError（阻塞检测）。用 os.path.abspath 推导
+# 绝对路径（__file__ 已是绝对路径，abspath 不触发 getcwd；Path.resolve() 在
+# Windows 会走 realpath→getcwd，反而踩坑）。
+_ENV_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    ".env",
+)
+
 # --- 第三方库 ---
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -25,7 +35,7 @@ class AppSettings(BaseSettings):
     """应用基础配置。"""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         # 无关环境变量（LangChain 生态/工具链注入）不阻断启动；
@@ -144,3 +154,11 @@ def get_settings() -> AppSettings:
         AppSettings: 应用配置实例（缓存）。
     """
     return AppSettings()
+
+
+# 模块导入时（同步上下文）预热配置单例——
+# AppSettings 首次实例化会经 sysconfig._safe_realpath 触发 os.getcwd() 同步
+# 阻塞调用，若发生在 langgraph async 节点内会被其阻塞检测抛 BlockingError
+# （表现为 load_memory/generator 的 no-memory/llm-fallback 降级）。在导入期
+# 提前触发，把这次同步调用移出 async 节点上下文。
+get_settings()
