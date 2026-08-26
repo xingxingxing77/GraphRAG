@@ -14,10 +14,9 @@ export function bindJwt(token: string): void {
   (client as unknown as { apiKey?: string }).apiKey = token;
 }
 
-/** 确保 thread 存在（惰性创建，03 §8）。 */
-export async function ensureThread(sessionId?: string): Promise<string> {
-  if (sessionId) return sessionId;
-  const th = await client.threads.create();
+/** 创建 thread（GAP-A1：带 user_id metadata，thread_id 即 session 锚点）。 */
+export async function ensureThread(userId: string): Promise<string> {
+  const th = await client.threads.create({ metadata: { user_id: userId } });
   return th.thread_id;
 }
 

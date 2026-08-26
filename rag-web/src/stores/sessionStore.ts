@@ -1,7 +1,8 @@
 /**
  * sessionStore（06 §3）：会话分页列表 + 游标 + 时间分组视图。
- * 线程惰性创建（03 §8）：仅当会话首条消息 precheck miss 且无 thread_id
- * 时才建 thread；本 store 维护 session_id ↔ thread_id 映射。
+ * GAP-A1：session_id 即 langgraph thread_id（thread_id 即 session 锚点，
+ * 02 §3.2），无独立映射；线程惰性创建（03 §8）——仅当会话首条消息
+ * precheck miss 时才经由 ensureThread 建 thread。
  * v1.3 布局重规划：新增时间分组派生（今天/7天内/更早）与 activeSession，
  * 由 ChatPage 左侧 WorkspaceSidebar 消费；无独立 /sessions 路由。
  */
@@ -70,13 +71,10 @@ interface SessionState {
   sessions: SessionSummary[];
   nextCursor: string | null;
   loading: boolean;
-  /** 当前在侧栏选中的会话（null = 空态/新会话） */
+  /** 当前在侧栏选中的会话（null = 空态/新会话）；值即 thread_id */
   activeSessionId: string | null;
-  /** session_id → thread_id（有 thread 时 thread_id 即 Agent 面标识） */
-  threadMap: Record<string, string>;
   loadMore(reset?: boolean): Promise<void>;
   setActive(sessionId: string | null): void;
-  bindThread(sessionId: string, threadId: string): void;
   remove(sessionId: string): void;
 }
 
@@ -85,7 +83,6 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
   nextCursor: null,
   loading: false,
   activeSessionId: null,
-  threadMap: {},
 
   async loadMore(reset = false) {
     const { nextCursor, loading } = get();
@@ -106,10 +103,6 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
 
   setActive(sessionId) {
     set({ activeSessionId: sessionId });
-  },
-
-  bindThread(sessionId, threadId) {
-    set((s) => ({ threadMap: { ...s.threadMap, [sessionId]: threadId } }));
   },
 
   remove(sessionId) {

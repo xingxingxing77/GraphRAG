@@ -70,9 +70,9 @@ export function useChatStream() {
     chat.appendUserMessage(query);
     chat.setStreaming(true);
 
-    // 会话标识：无活动会话时生成本地占位（后端持久化随 checkpoint 落库）
-    const sessionId = session.activeSessionId ?? `s_${crypto.randomUUID()}`;
-    if (session.activeSessionId !== sessionId) session.setActive(sessionId);
+    // 会话标识 = thread_id（GAP-A1：thread_id 即 session 锚点，02 §3.2）；
+    // 新会话时为 null（空态），precheck miss 后惰性建 thread 并以 thread_id 承载
+    let sessionId: string | null = session.activeSessionId;
 
     // ① L1 语义缓存短路（J22）：命中直接渲染缓存答案，不发起 run；
     //    miss 时消费 suggested_run.latency_tier（意图启发式建议档位，06 §8.2）
@@ -99,15 +99,18 @@ export function useChatStream() {
     try {
       const token = useAuthStore.getState().token;
       if (token) bindJwt(token);
-      const threadId = await ensureThread(session.threadMap[sessionId]);
-      session.bindThread(sessionId, threadId);
+      const threadId = sessionId ?? (await ensureThread(user.id));
+      if (!sessionId) {
+        sessionId = threadId;
+        session.setActive(threadId);
+      }
 
       // 档位优先顺序：suggested_run（precheck 意图启发式）> 用户显式选择 > auto 兜底 standard
       const tier =
         suggestedTier ?? (chat.activeTier === "auto" ? "standard" : chat.activeTier);
       const stream = streamRun(
         threadId,
-        { original_query: query, session_id: sessionId, user_id: user.id },
+        { original_query: query, session_id: threadId, user_id: user.id },
         { latency_tier: tier, model: model ?? chat.model ?? null },
       );
 

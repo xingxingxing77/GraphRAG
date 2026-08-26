@@ -1,9 +1,9 @@
 """
-会话端点（02 §3.2-§3.4 · 单元 10.2）。
+会话端点（02 §3.2-§3.4 · 单元 10.2 · GAP-A1 会话接线）。
 
-数据源：开发期经 session_store 进程内登记（权威源迁移锚点：
-10.3 thread checkpoint + Postgres，J21）；仅本人会话可见，
-他人会话一律 404（防枚举）。
+数据源：thread_store 经 langgraph-server Threads API（J21 Postgres
+checkpoint，thread_id 即 session 锚点）；仅本人会话可见，他人会话
+一律 404（防枚举）。
 """
 
 # --- 标准库 ---
@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Response
 
 # --- 本地模块 ---
-from app.api import session_store
+from app.api import thread_store
 from app.api.errors import ApiError, ErrorCode
 from app.api.security import get_current_user
 from app.core.models import Paged, SessionMessage, SessionSummary
@@ -27,19 +27,19 @@ async def list_sessions(
     limit: int = 20,
     user: dict[str, Any] = Depends(get_current_user),
 ) -> Paged[SessionSummary]:
-    """当前用户会话列表（游标分页，仅本人）。
+    """当前用户会话列表（= langgraph threads，游标分页，仅本人）。
 
-    title 为该会话首条用户消息截断（≤30 字符）。
+    标题为该线程最近原始查询截断（≤30 字符）。
 
     Args:
-        cursor: 分页游标。
+        cursor: 分页游标（offset）。
         limit: 每页数量。
         user: JWT 用户声明。
 
     Returns:
         Paged[SessionSummary]: 会话摘要列表。
     """
-    items, next_cursor = session_store.list_sessions(
+    items, next_cursor = await thread_store.list_sessions(
         user_id=str(user.get("sub", "")), cursor=cursor, limit=limit
     )
     return Paged[SessionSummary](items=items, next_cursor=next_cursor)
@@ -52,21 +52,21 @@ async def get_session_messages(
     limit: int = 50,
     user: dict[str, Any] = Depends(get_current_user),
 ) -> Paged[SessionMessage]:
-    """会话历史消息（归属校验，他人会话 404）。
+    """会话历史消息（thread checkpoint 聚合，归属校验，他人会话 404）。
 
     Args:
-        session_id: 会话 ID。
-        cursor: 分页游标。
-        limit: 每页数量（默认 50）。
+        session_id: thread_id（session 锚点）。
+        cursor: 预留消息游标。
+        limit: 历史 checkpoint 数上限（默认 50）。
         user: JWT 用户声明。
 
     Returns:
         Paged[SessionMessage]: 历史消息列表。
 
     Raises:
-        ApiError: SESSION_404_NOT_FOUND（不存在或非本人）。
+        ApiError: SESSION_404_NOT_FOUND（不存在/非本人/依赖故障）。
     """
-    result = session_store.get_messages(
+    result = await thread_store.get_messages(
         user_id=str(user.get("sub", "")),
         session_id=session_id,
         cursor=cursor,
@@ -84,12 +84,10 @@ async def delete_session(
     response: Response,
     user: dict[str, Any] = Depends(get_current_user),
 ) -> Response:
-    """删除会话及其记忆（归属校验）。
-
-    级联清理 checkpoint / wm / episodic 随 10.3/10.4 接线（A-05）。
+    """删除会话及其记忆（= 删除 thread，级联 checkpoint）。
 
     Args:
-        session_id: 会话 ID。
+        session_id: thread_id。
         response: 响应对象（204 无内容）。
         user: JWT 用户声明。
 
@@ -99,7 +97,7 @@ async def delete_session(
     Raises:
         ApiError: SESSION_404_NOT_FOUND。
     """
-    deleted = session_store.delete_session(
+    deleted = await thread_store.delete_session(
         user_id=str(user.get("sub", "")), session_id=session_id
     )
     if not deleted:

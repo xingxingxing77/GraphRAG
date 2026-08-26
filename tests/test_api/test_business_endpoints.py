@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 # --- 本地模块 ---
-from app.api import session_store
+from app.api import session_store, thread_store
 from app.core.config import get_settings
 from app.main import create_app
 
@@ -35,9 +35,26 @@ def _auth_headers() -> dict[str, str]:
 
 
 @pytest.fixture(autouse=True)
-def _clean_store():
-    """每用例清空会话存储。"""
+def _clean_store(monkeypatch):
+    """会话存储走内存替身：thread_store 委托 session_store。
+
+    GAP-A1 生产路径为 langgraph-server threads（测试无 langgraph-server
+    不可达），此处用进程内替身委托验证端点鉴权/归属/204/404 语义。
+    """
     session_store.clear_store()
+
+    async def list_sessions(user_id, cursor, limit):
+        return session_store.list_sessions(user_id, cursor, limit)
+
+    async def get_messages(user_id, session_id, cursor, limit):
+        return session_store.get_messages(user_id, session_id, cursor, limit)
+
+    async def delete_session(user_id, session_id):
+        return session_store.delete_session(user_id, session_id)
+
+    monkeypatch.setattr(thread_store, "list_sessions", list_sessions)
+    monkeypatch.setattr(thread_store, "get_messages", get_messages)
+    monkeypatch.setattr(thread_store, "delete_session", delete_session)
     yield
     session_store.clear_store()
 
