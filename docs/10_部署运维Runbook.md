@@ -29,6 +29,7 @@
 | `REDIS_URL` | 工作记忆 / L2 / 限流 | AOF |
 | `JWT_SECRET` | 双服务共享签名密钥（HS256） | app 与 langgraph-server 必须一致（J16/J19） |
 | `X-API-Key` / 服务 Key | 兑换 / 服务间调用 | 仅环境变量（`api_key_ref`） |
+| `DEBUG_ENABLED` | admin 调试端点总开关 | `false`（fail-closed，D7）；dev 置 `true` 开 `/admin/debug/*`（`SYS_403_DEBUG_DISABLED`） |
 | `VITE_API_BASE` | 前端→业务面 | `http://localhost:8000/api/v1` |
 | `VITE_AGENT_BASE` | 前端→langgraph | `http://localhost:8001` |
 | `VITE_AGENT_ASSISTANT` | 图 assistant_id | `rag_agent` |
@@ -115,4 +116,4 @@ SSE 流内 `X-Degraded` 启动即知 + `values.degraded_reasons` 终态；REST �
 
 ---
 
-*变更记录：v1.0（2026-08-23）依据架构 D9 / 01 §7 / 04 / 02 §2.4·§3.9 / 03 §5 创建，补齐 G7 运维缺口。v1.1（2026-08-26）§3 新增环境就绪后的 L2 联调自测路径（docker compose 全栈 + .env 真实密钥 + /ready 全绿 → scripts/l2_smoke.py / pytest tests/integration 双口径），对齐单元 10.4 harness 交付。*
+*变更记录：v1.0（2026-08-23）依据架构 D9 / 01 §7 / 04 / 02 §2.4·§3.9 / 03 §5 创建，补齐 G7 运维缺口。v1.1（2026-08-26）§3 新增环境就绪后的 L2 联调自测路径（docker compose 全栈 + .env 真实密钥 + /ready 全绿 → scripts/l2_smoke.py / pytest tests/integration 双口径），对齐单元 10.4 harness 交付。v1.2（2026-08-26）§2 环境变量表新增 `DEBUG_ENABLED`（admin 调试端点总开关，fail-closed，D7/BUG-10）。*

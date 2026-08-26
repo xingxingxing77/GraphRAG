@@ -304,7 +304,7 @@ curl -X POST http://localhost:8000/api/v1/auth/token \
 
 ### 3.11 /admin/debug/* —— 调试与管道预览接口组
 
-统一约定：鉴权同 §3.10（JWT+admin）；全部为**只读或显式触发型**调试端点，生产环境可通过配置整体禁用（`admin.debug_enabled=false` 时返回 `SYS_403_DEBUG_DISABLED`）。括号内为关联子阶段单元号（01 §6）。
+统一约定：鉴权同 §3.10（JWT+admin）；全部为**只读或显式触发型**调试端点，默认整体禁用（fail-closed，`debug_enabled=false` 返回 `SYS_403_DEBUG_DISABLED`），开发环境经 `DEBUG_ENABLED=true` 显式开启。括号内为关联子阶段单元号（01 §6）。
 
 | 方法 路径 | 请求体 / Query | 响应 | 用途（单元） |
 |-----------|----------------|------|--------------|
@@ -501,4 +501,4 @@ export type AgentNodeName =
 
 ---
 
-*变更记录：v1.0（2026-08-23）基于《GraphRAG 系统架构文档 v3.0》§2.2/§3.3/§3.6 创建。v1.1（2026-08-24）§6 补登 SYS_400_VALIDATION / SYS_404_NOT_FOUND（0.6 契约冻结缺口修复，统一错误体覆盖框架层校验/404）。v1.2（2026-08-24）§5 RunConfig 补 auto 解析点说明（query_understanding 节点定档回写，架构 2.4 v3.1 裁决）；无字段/错误码变更。*
+*变更记录：v1.0（2026-08-23）基于《GraphRAG 系统架构文档 v3.0》§2.2/§3.3/§3.6 创建。v1.1（2026-08-24）§6 补登 SYS_400_VALIDATION / SYS_404_NOT_FOUND（0.6 契约冻结缺口修复，统一错误体覆盖框架层校验/404）。v1.2（2026-08-24）§5 RunConfig 补 auto 解析点说明（query_understanding 节点定档回写，架构 2.4 v3.1 裁决）；无字段/错误码变更。v1.3（2026-08-26）§3.11 调试组开关表述改 fail-closed：默认可达禁用（`debug_enabled=false` → `SYS_403_DEBUG_DISABLED`），dev 经 `DEBUG_ENABLED=true` 开启；无字段/错误码变更（BUG-10）。*

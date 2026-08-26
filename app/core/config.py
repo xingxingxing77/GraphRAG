@@ -30,8 +30,8 @@ class AppSettings(BaseSettings):
     app_version: str = Field(default="0.1.0", description="应用版本")
     debug: bool = Field(default=False, description="调试模式")
     debug_enabled: bool = Field(
-        default=True,
-        description="admin 调试端点开关（/admin/debug/* 等；生产置 False 返回 SYS_403_DEBUG_DISABLED，02 §3.11）",
+        default=False,
+        description="admin 调试端点开关（fail-closed，D7；/admin/debug/* 等，置 False 返回 SYS_403_DEBUG_DISABLED，dev 经 DEBUG_ENABLED=true 显式开启，02 §3.11）",
     )
 
     # CORS：显式白名单（禁用 "*" + credentials 组合，架构第 1 层注；

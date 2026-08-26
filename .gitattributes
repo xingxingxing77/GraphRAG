@@ -1,0 +1,15 @@
+# 行尾与二进制策略（BUG-11 / 01 §6.11 单元 10.8 批次 R4）
+# 文本统一 LF（仓库内与检出均为 LF），二进制不做任何转换。
+* text=auto eol=lf
+
+# 显式二进制（menu 语料图片与运行时产物），禁止 CRLF 转换
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.pckl binary
+*.pkl binary
+*.pyc binary
+*.db binary
