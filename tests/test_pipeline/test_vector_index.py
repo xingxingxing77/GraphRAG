@@ -127,3 +127,20 @@ class TestVectorIndexerQdrant:
         finally:
             await client.delete_by_doc(collection, f"{_TEST_PREFIX}doc")
             await client.close()
+
+
+class TestQdrantClientCompat:
+    """01 §6.11 单元 10.8 批次 R3 BUG-08：禁用客户端兼容性检查，消除离线 UserWarning。"""
+
+    @pytest.mark.asyncio
+    async def test_connect_no_compatibility_warning(self) -> None:
+        """connect() 构造 AsyncQdrantClient 改为 check_compatibility=False，不再探测服务端版本（BUG-08）。"""
+        import warnings
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            client = QdrantDBClient(host="localhost", port=6333)
+            await client.connect()
+            await client.close()
+        compat = [w for w in caught if "compatibility" in str(w.message).lower()]
+        assert compat == []

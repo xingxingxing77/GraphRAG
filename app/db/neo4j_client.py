@@ -131,8 +131,10 @@ class Neo4jClient:
         Returns:
             匹配的实体及其关系的字典列表。
         """
-        # TODO(阶段 3 graph_retriever): 04 §5.4 Local Search 模板
+        # Local Search 图检索模板（04 §5.4）：
         #   MATCH (e:Entity {canonical_name: $entity})-[r]-(n) RETURN e, r, n
+        # 当前由 graph_retriever 经 execute_cypher 落地；本方法为
+        # 04 §5.4 Local Search 的显式接口占位，随专项接线启用。
         raise NotImplementedError
 
     async def check_health(self) -> bool:

@@ -72,7 +72,9 @@ class QdrantDBClient:
     async def connect(self) -> None:
         """建立 Qdrant 异步客户端连接。"""
         if self._client is None:
-            self._client = AsyncQdrantClient(host=self.host, port=self.port)
+            self._client = AsyncQdrantClient(
+                host=self.host, port=self.port, check_compatibility=False
+            )
 
     async def close(self) -> None:
         """关闭 Qdrant 客户端连接。"""
