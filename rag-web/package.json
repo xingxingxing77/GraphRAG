@@ -19,8 +19,10 @@
     "lucide-react": "^1.33.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.2",
     "recharts": "^3.10.1",
+    "rehype-highlight": "^7.0.2",
     "zustand": "^5.0.15"
   },
   "devDependencies": {

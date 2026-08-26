@@ -9,6 +9,10 @@ import { useEffect, useMemo, useState } from "react";
 
 import { DegradedBanner } from "@/components/DegradedBanner";
 import { Composer, EmptyStateHero } from "@/components/EmptyStateHero";
+import { FaithfulnessBadge } from "@/components/FaithfulnessBadge";
+import { FeedbackButtons } from "@/components/FeedbackButtons";
+import { MarkdownAnswer } from "@/components/MarkdownAnswer";
+import { RegenerationNotice } from "@/components/RegenerationNotice";
 import { WorkspaceSidebar } from "@/components/WorkspaceSidebar";
 import { deleteSession } from "@/api/sessions";
 import { useChatStream } from "@/hooks/useChatStream";
@@ -44,6 +48,10 @@ export default function ChatPage() {
   const thoughtSteps = useChatStore((s) => s.thoughtSteps);
   const streaming = useChatStore((s) => s.streaming);
   const typewriterTarget = useChatStore((s) => s.typewriterTarget);
+  const regenerating = useChatStore((s) => s.regenerating);
+  const faithfulnessScore = useChatStore((s) => s.faithfulnessScore);
+  const loadHistory = useChatStore((s) => s.loadHistory);
+  const reset = useChatStore((s) => s.reset);
 
   const { send } = useChatStream();
 
@@ -73,23 +81,50 @@ export default function ChatPage() {
     remove(sessionId);
   }
 
+  /** 选择会话：装载历史消息（10.8 批次 B：会话历史装载，02 §3.3）。 */
+  function handleSelect(sessionId: string) {
+    setActive(sessionId);
+    void loadHistory(sessionId);
+  }
+
+  /** 新建会话：清空消息态（回到空态）。 */
+  function handleNew() {
+    setActive(null);
+    reset();
+  }
+
   /** 气泡渲染（终态打字机：typewriterTarget 与该条内容一致时回放）。 */
-  function renderBubble(m: ChatMessage) {
+  function renderBubble(m: ChatMessage, isLast: boolean) {
     const typing = m.role === "assistant" && typewriterTarget !== null && typewriterTarget === m.content;
     return (
-      <span className="inline-block max-w-[80%] rounded-2xl border border-neutral-200 px-3.5 py-2 text-left text-sm dark:border-neutral-700">
-        {typing ? <TypewriterMessage text={m.content} /> : m.content}
-        {m.cacheHit ? (
-          <span className="ml-2 rounded-full bg-neutral-100 px-1.5 py-0.5 text-[10px] text-neutral-500 dark:bg-neutral-800">
-            缓存命中
-          </span>
-        ) : null}
-        {m.degraded ? (
-          <span className="ml-2 rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] text-orange-600 dark:bg-orange-950 dark:text-orange-300">
-            已降级
-          </span>
-        ) : null}
-      </span>
+      <div className="inline-block max-w-[80%] rounded-2xl border border-neutral-200 px-3.5 py-2 text-left text-sm dark:border-neutral-700">
+        {m.role === "assistant" ? (
+          typing ? (
+            <TypewriterMessage text={m.content} />
+          ) : (
+            <MarkdownAnswer content={m.content} citations={m.citations} />
+          )
+        ) : (
+          m.content
+        )}
+        <span className="mt-1 flex flex-wrap items-center gap-1">
+          {m.cacheHit ? (
+            <span className="rounded-full bg-neutral-100 px-1.5 py-0.5 text-[10px] text-neutral-500 dark:bg-neutral-800">
+              缓存命中
+            </span>
+          ) : null}
+          {m.degraded ? (
+            <span className="rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] text-orange-600 dark:bg-orange-950 dark:text-orange-300">
+              已降级
+            </span>
+          ) : null}
+          {m.role === "assistant" && isLast && faithfulnessScore !== null ? (
+            <FaithfulnessBadge score={faithfulnessScore} />
+          ) : null}
+          {m.role === "assistant" && isLast ? <RegenerationNotice visible={regenerating} /> : null}
+        </span>
+        {m.role === "assistant" ? <FeedbackButtons messageId={m.messageId ?? m.id} /> : null}
+      </div>
     );
   }
 
@@ -98,8 +133,8 @@ export default function ChatPage() {
       <WorkspaceSidebar
         sessions={filteredSessions}
         activeId={activeSessionId}
-        onSelect={(id) => setActive(id)}
-        onNew={() => setActive(null)}
+        onSelect={handleSelect}
+        onNew={handleNew}
         onDelete={handleDelete}
         onSearch={setSearch}
       />
@@ -110,9 +145,9 @@ export default function ChatPage() {
         ) : (
           <>
             <div className="flex-1 space-y-3 overflow-y-auto px-6 py-4">
-              {messages.map((m) => (
+              {messages.map((m, idx) => (
                 <div key={m.id} className={m.role === "user" ? "text-right" : ""}>
-                  {renderBubble(m)}
+                  {renderBubble(m, idx === messages.length - 1)}
                 </div>
               ))}
               {/* ThoughtPanel（03 §3.5 前端聚合；M1：中间产物只进折叠区） */}

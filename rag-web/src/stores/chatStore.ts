@@ -9,6 +9,8 @@ import type { AgentNodeName, Citation, DegradedReason } from "@/types";
 
 export interface ChatMessage {
   id: string;
+  /** 后端消息 ID（会话历史/反馈用；本地新消息为占位 id） */
+  messageId?: string;
   role: "user" | "assistant";
   content: string;
   citations?: Citation[];
@@ -35,6 +37,12 @@ interface ChatState {
   degradedReasons: DegradedReason[];
   /** 用户选择档位，默认 auto（意图路由定档，D4） */
   activeTier: "auto" | "fast" | "standard" | "deep";
+  /** 用户选择的模型条目（J2 请求级覆盖；空串 = 默认条目） */
+  model: string | null;
+  /** 重生成提示（SSE updates.generator.regenerated） */
+  regenerating: boolean;
+  /** deep 档忠实度评分（SSE updates.self_correction.faithfulness_score） */
+  faithfulnessScore: number | null;
   appendUserMessage(query: string): void;
   appendAssistant(msg: Omit<ChatMessage, "id" | "role">): void;
   setStreaming(v: boolean): void;
@@ -43,6 +51,10 @@ interface ChatState {
   consumeTypewriter(): void;
   pushDegraded(reasons: string[]): void;
   setActiveTier(tier: "auto" | "fast" | "standard" | "deep"): void;
+  setModel(model: string | null): void;
+  setRegenerating(v: boolean): void;
+  setFaithfulnessScore(score: number | null): void;
+  loadHistory(sessionId: string): Promise<void>;
   reset(): void;
 }
 
@@ -56,6 +68,9 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   typewriterTarget: null,
   degradedReasons: [],
   activeTier: "auto",
+  model: null,
+  regenerating: false,
+  faithfulnessScore: null,
 
   appendUserMessage(query) {
     set((s) => ({
@@ -113,6 +128,37 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     set({ activeTier: tier });
   },
 
+  setModel(model) {
+    set({ model });
+  },
+
+  setRegenerating(v) {
+    set({ regenerating: v });
+  },
+
+  setFaithfulnessScore(score) {
+    set({ faithfulnessScore: score });
+  },
+
+  async loadHistory(sessionId) {
+    set({ streaming: false, thoughtSteps: [], typewriterTarget: null, regenerating: false, faithfulnessScore: null });
+    const { getSessionMessages } = await import("@/api/sessions");
+    const page = await getSessionMessages(sessionId);
+    const items = page.items ?? [];
+    set({
+      messages: items.map((m) => ({
+        id: m.message_id,
+        messageId: m.message_id,
+        role: m.role,
+        content: m.content,
+        citations: m.citations,
+        degraded: m.degraded,
+        latencyTier: m.latency_tier ?? undefined,
+        createdAt: m.created_at,
+      })),
+    });
+  },
+
   reset() {
     set({
       messages: [],
@@ -120,6 +166,8 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       thoughtSteps: [],
       typewriterTarget: null,
       degradedReasons: [],
+      regenerating: false,
+      faithfulnessScore: null,
     });
   },
 }));

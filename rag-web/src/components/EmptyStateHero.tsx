@@ -99,8 +99,9 @@ const DEFAULT_SUGGESTIONS = [
 export function EmptyStateHero({ suggestions, onSubmit }: EmptyStateHeroProps) {
   const activeTier = useChatStore((s) => s.activeTier);
   const setActiveTier = useChatStore((s) => s.setActiveTier);
+  const model = useChatStore((s) => s.model);
+  const setModel = useChatStore((s) => s.setModel);
   const models = useConfigStore((s) => s.models);
-  const [model, setModel] = useState<string>("");
 
   return (
     <div className="flex h-full flex-col items-center justify-center px-6">
@@ -124,8 +125,8 @@ export function EmptyStateHero({ suggestions, onSubmit }: EmptyStateHeroProps) {
         </select>
         <select
           className={CHIP_SELECT}
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
+          value={model ?? ""}
+          onChange={(e) => setModel(e.target.value || null)}
           aria-label="模型"
         >
           <option value="">默认模型</option>

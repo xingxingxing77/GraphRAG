@@ -74,7 +74,9 @@ export function useChatStream() {
     const sessionId = session.activeSessionId ?? `s_${crypto.randomUUID()}`;
     if (session.activeSessionId !== sessionId) session.setActive(sessionId);
 
-    // ① L1 语义缓存短路（J22）：命中直接渲染缓存答案，不发起 run
+    // ① L1 语义缓存短路（J22）：命中直接渲染缓存答案，不发起 run；
+    //    miss 时消费 suggested_run.latency_tier（意图启发式建议档位，06 §8.2）
+    let suggestedTier: "fast" | "standard" | "deep" | null = null;
     try {
       const pre = await precheck({ query, session_id: sessionId });
       if (pre.hit) {
@@ -87,6 +89,8 @@ export function useChatStream() {
         chat.setStreaming(false);
         return;
       }
+      const st = pre.suggested_run?.latency_tier;
+      if (st) suggestedTier = st;
     } catch {
       /* precheck 异常按 miss 处理（03 §8） */
     }
@@ -98,12 +102,13 @@ export function useChatStream() {
       const threadId = await ensureThread(session.threadMap[sessionId]);
       session.bindThread(sessionId, threadId);
 
-      // auto 档由后端 query_understanding 定档回写（架构 2.4 v3.1）；前端读超时按 standard 余量兜底
-      const tier = chat.activeTier === "auto" ? "standard" : chat.activeTier;
+      // 档位优先顺序：suggested_run（precheck 意图启发式）> 用户显式选择 > auto 兜底 standard
+      const tier =
+        suggestedTier ?? (chat.activeTier === "auto" ? "standard" : chat.activeTier);
       const stream = streamRun(
         threadId,
         { original_query: query, session_id: sessionId, user_id: user.id },
-        { latency_tier: tier, model: model || null },
+        { latency_tier: tier, model: model ?? chat.model ?? null },
       );
 
       // 读超时兜底（03 §7）：超时中断消费并按 CHAT_504_TIER_TIMEOUT 呈现
@@ -121,7 +126,13 @@ export function useChatStream() {
           // updates 载荷形如 { "<node>": delta }（03 §3.3，thought 唯一来源）
           const [node, delta] = Object.entries(data)[0] ?? [];
           if (node && isAgentNode(node)) {
-            chat.pushThoughtStep(node, summarizeNodeUpdate(node, (delta ?? {}) as Record<string, unknown>));
+            const d = (delta ?? {}) as Record<string, unknown>;
+            chat.pushThoughtStep(node, summarizeNodeUpdate(node, d));
+            // 重生成提示（5.6）与忠实度徽章（7.1）状态驱动
+            if (node === "generator" && d.regenerated === true) chat.setRegenerating(true);
+            if (node === "self_correction" && typeof d.faithfulness_score === "number") {
+              chat.setFaithfulnessScore(d.faithfulness_score as number);
+            }
           }
         } else if (event === "values") {
           const fin = extractFinalState(data);
