@@ -23,6 +23,7 @@ build/
 
 # === 运行时数据（采集清单等，不入库） ===
 data/
+.langgraph_api/
 
 # === 前端 (rag-web) ===
 node_modules/
