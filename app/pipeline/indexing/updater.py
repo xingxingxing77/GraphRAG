@@ -1,107 +1,105 @@
 """
-索引更新策略。
+索引更新策略（GAP-A3 · 编排入口）。
 
-管理索引的全量重建、增量更新和文档删除操作，
-确保索引数据与源文档保持一致。
+协调 PipelineService（端到端索引编排）与三存储的删除能力：
+- full_rebuild：对给定文档全量重跑 P2-P6 管线并三索引幂等写入。
+- incremental_update：对变更文档重跑管线（索引幂等 upsert）。
+- delete_document：从 Qdrant / Neo4j / ES 三处删除 doc_id 相关条目。
+
+注意（GAP-B1）：全量「清空重建」语义与 admin index/rebuild 的
+「校验修复」档是两个不同入口——本类仅提供「重嵌入 upsert」语义，
+「先清空再重建」由调用方（admin rebuild full 档）在调用前自行清空，
+以避免 J18 禁热更的全量重建误触发。
 """
 
 # --- 标准库 ---
 import logging
-from typing import Any
 
 # --- 本地模块 ---
-from app.pipeline.indexing.vector_indexer import VectorIndexer
-from app.pipeline.indexing.graph_indexer import GraphIndexer
-from app.pipeline.indexing.fulltext_indexer import FullTextIndexer
+from app.core.models import RawDocument
+from app.db.es_client import CHUNKS_ALIAS
+from app.pipeline.indexing.pipeline_service import IndexStats, PipelineService
 
 logger = logging.getLogger(__name__)
 
+# 业务集合前缀（04 §3.1 rag_{doc_type}）
+_COLLECTION_PREFIX = "rag_"
+
 
 class IndexUpdater:
-    """索引更新策略。
-
-    协调 VectorIndexer、GraphIndexer 和 FullTextIndexer，
-    提供统一的索引维护接口：
-
-    - ``full_rebuild``：全量重建所有索引。
-    - ``incremental_update``：仅更新变更文件对应的索引。
-    - ``delete_document``：删除指定文档的全部索引数据。
+    """索引更新策略（编排入口，GAP-A3）。
 
     Attributes:
-        vector_indexer: Qdrant 向量索引器。
-        graph_indexer: Neo4j 图谱索引器。
-        fulltext_indexer: Neo4j 全文索引器。
+        pipeline: 端到端索引编排器。
     """
 
-    def __init__(
-        self,
-        vector_indexer: VectorIndexer,
-        graph_indexer: GraphIndexer,
-        fulltext_indexer: FullTextIndexer,
-    ) -> None:
+    def __init__(self, pipeline: PipelineService) -> None:
         """初始化 IndexUpdater。
 
         Args:
-            vector_indexer: VectorIndexer 实例。
-            graph_indexer: GraphIndexer 实例。
-            fulltext_indexer: FullTextIndexer 实例。
+            pipeline: PipelineService 实例（含三 indexer 与 P2-P5 管线）。
         """
-        self.vector_indexer = vector_indexer
-        self.graph_indexer = graph_indexer
-        self.fulltext_indexer = fulltext_indexer
+        self.pipeline = pipeline
 
-    async def full_rebuild(self) -> None:
-        """全量重建所有索引。
+    async def full_rebuild(self, documents: list[RawDocument]) -> IndexStats:
+        """全量重建：对全部文档重跑管线并幂等写入三索引。
 
-        处理流程：
-        1. 清空现有向量 Collection 和图数据库中的节点/关系。
-        2. 扫描所有源文档。
-        3. 对每个文档执行完整的 P2-P6 管道流程。
-        4. 将结果写入所有索引。
-
-        适用于首次构建或数据模型变更后的重建场景。
-
-        Raises:
-            RuntimeError: 管道执行过程中发生不可恢复错误。
-        """
-        # TODO: 1. 清空 Qdrant Collection
-        # TODO: 2. 清空 Neo4j 中的 Document/Chunk/Entity 节点
-        # TODO: 3. 扫描所有源文件
-        # TODO: 4. 逐文件执行 P2-P6 管道
-        # TODO: 5. 记录全量重建日志（耗时、文档数、chunk 数）
-        raise NotImplementedError
-
-    async def incremental_update(
-        self,
-        changed_files: list[str],
-    ) -> None:
-        """增量更新变更文件对应的索引。
-
-        仅对变更的文件重新执行管道流程，
-        先删除旧索引数据，再写入新数据。
+        幂等性由各 indexer 保证（point id / MERGE / _id 确定性派生），
+        重复调用不产生重复数据。
 
         Args:
-            changed_files: 变更文件路径列表。
+            documents: RawDocument 列表（采集层输出）。
 
-        Raises:
-            FileNotFoundError: 变更文件路径不存在。
+        Returns:
+            IndexStats: 重建统计。
         """
-        # TODO: 1. 遍历 changed_files
-        # TODO: 2. 对每个文件，先删除旧索引（调用 delete_document）
-        # TODO: 3. 重新执行 P2-P6 管道
-        # TODO: 4. 写入新索引
-        # TODO: 5. 记录增量更新日志
-        raise NotImplementedError
+        logger.info("全量重建开始：%d 个文档", len(documents))
+        return await self.pipeline.index_documents(documents)
+
+    async def incremental_update(self, documents: list[RawDocument]) -> IndexStats:
+        """增量更新：对变更文档重跑管线（幂等 upsert 覆盖旧值）。
+
+        Args:
+            documents: 变更的 RawDocument 列表。
+
+        Returns:
+            IndexStats: 本次更新统计。
+        """
+        logger.info("增量更新开始：%d 个文档", len(documents))
+        return await self.pipeline.index_documents(documents)
 
     async def delete_document(self, doc_id: str) -> None:
-        """删除指定文档的全部索引数据。
+        """删除指定文档在 Qdrant / Neo4j / ES 的全部索引数据。
 
-        从 Qdrant 和 Neo4j 中移除与 doc_id 关联的所有数据。
+        幂等：doc_id 不存在时各存储删除为空操作不报错。
 
         Args:
-            doc_id: 文档唯一标识（通常为 content_hash 或 source_path）。
+            doc_id: 文档唯一标识（RawDocument.doc_id）。
         """
-        # TODO: 1. 在 Qdrant 中删除 payload 匹配 doc_id 的 points
-        # TODO: 2. 在 Neo4j 中删除 Document 节点及其关联的 Chunk/Entity
-        # TODO: 3. 记录删除日志
-        raise NotImplementedError
+        # ① Qdrant：遍历业务集合按 doc_id 删 points
+        try:
+            collections = await self.pipeline.vector_indexer.db_client.list_collections()
+            for name in collections:
+                if name.startswith(_COLLECTION_PREFIX):
+                    await self.pipeline.vector_indexer.db_client.delete_by_doc(name, doc_id)
+        except Exception as exc:  # noqa: BLE001 - 删除失败记日志继续（M3/D5）
+            logger.warning("Qdrant 删除 doc_id=%s 失败: %s", doc_id, exc)
+
+        # ② Neo4j：删除 Chunk/Document 节点（级联 MENTIONS/REL 边自动清）
+        for cypher in (
+            "MATCH (c:Chunk {doc_id: $doc_id}) DETACH DELETE c",
+            "MATCH (d:Document {doc_id: $doc_id}) DETACH DELETE d",
+        ):
+            try:
+                await self.pipeline.graph_writer.client.execute_cypher(
+                    cypher, {"doc_id": doc_id}
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Neo4j 删除 doc_id=%s 失败: %s", doc_id, exc)
+
+        # ③ ES：按 doc_id 删 chunk 文档（实体随社区重算/重建同步，J6）
+        try:
+            await self.pipeline.es_syncer.es.delete_by_doc(CHUNKS_ALIAS, doc_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ES 删除 doc_id=%s 失败: %s", doc_id, exc)
+        logger.info("删除 doc_id=%s 完成", doc_id)

@@ -58,6 +58,8 @@ MYPY_TARGETS = [
     "app/db/redis_client.py",
     "app/pipeline/indexing/vector_indexer.py",
     "app/pipeline/indexing/fulltext_indexer.py",
+    "app/pipeline/indexing/pipeline_service.py",
+    "app/pipeline/indexing/updater.py",
     "app/retrieval/base.py",
     "app/retrieval/dense_retriever.py",
     "app/retrieval/sparse_retriever.py",

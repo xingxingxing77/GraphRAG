@@ -296,7 +296,7 @@ curl -X POST http://localhost:8000/api/v1/auth/token \
 | 方法 路径 | 请求体 | 响应 | 说明 |
 |-----------|--------|------|------|
 | POST /admin/cache/clear | `{ "scope": "l1"\|"l2"\|"all", "doc_id"? }` | `{ "purged": 123 }` | 按 doc_id 反查清除受影响缓存（失效联动） |
-| POST /admin/index/rebuild | `{ "scope": "vector"\|"graph"\|"fulltext"\|"all", "full": true }` | `202 { "task_id": "t_x1" }` | 异步重建；进度查 `GET /admin/tasks/{task_id}` |
+| POST /admin/index/rebuild | `{ "scope": "vector"\|"graph"\|"fulltext"\|"all", "full": true }` | `202 { "task_id": "t_x1" }` | 异步重建两档：`full=true` 全量重嵌入（采集→管道→三索引，GAP-A3）；`full=false` 校验修复（scope 逐段：check_health/ensure_constraints/死信重放）。进度查 `GET /admin/tasks/{task_id}` |
 | PUT /admin/config/hot-reload | `{}` | `{ "reloaded": ["cleaning_rules","pipeline_config"] , "errors": [] }` | J18 受限热更（§7 of 01） |
 | GET /admin/review-queue | query: `cursor`,`limit` | `{ items:[{entity_id,name,freq,first_seen}], next_cursor }` | J12 开放区人工审核队列（按出现频次排序） |
 | POST /admin/review/decision | `{ "entity_id": "...", "action": "approve"\|"reject" }` | `{ "ok": true }` | approve → 升级白名单并重放关联三元组 |
@@ -501,4 +501,4 @@ export type AgentNodeName =
 
 ---
 
-*变更记录：v1.0（2026-08-23）基于《GraphRAG 系统架构文档 v3.0》§2.2/§3.3/§3.6 创建。v1.1（2026-08-24）§6 补登 SYS_400_VALIDATION / SYS_404_NOT_FOUND（0.6 契约冻结缺口修复，统一错误体覆盖框架层校验/404）。v1.2（2026-08-24）§5 RunConfig 补 auto 解析点说明（query_understanding 节点定档回写，架构 2.4 v3.1 裁决）；无字段/错误码变更。v1.3（2026-08-26）§3.11 调试组开关表述改 fail-closed：默认可达禁用（`debug_enabled=false` → `SYS_403_DEBUG_DISABLED`），dev 经 `DEBUG_ENABLED=true` 开启；无字段/错误码变更（BUG-10）。*
+*变更记录：v1.0（2026-08-23）基于《GraphRAG 系统架构文档 v3.0》§2.2/§3.3/§3.6 创建。v1.1（2026-08-24）§6 补登 SYS_400_VALIDATION / SYS_404_NOT_FOUND（0.6 契约冻结缺口修复，统一错误体覆盖框架层校验/404）。v1.2（2026-08-24）§5 RunConfig 补 auto 解析点说明（query_understanding 节点定档回写，架构 2.4 v3.1 裁决）；无字段/错误码变更。v1.3（2026-08-26）§3.11 调试组开关表述改 fail-closed：默认可达禁用（`debug_enabled=false` → `SYS_403_DEBUG_DISABLED`），dev 经 `DEBUG_ENABLED=true` 开启；无字段/错误码变更（BUG-10）。v1.4（2026-08-26）§3.10 index/rebuild 语义澄清两档（GAP-B1）：`full=true` 全量重嵌入（采集→管道→三索引，GAP-A3 编排入口）、`full=false` 校验修复；请求/响应字段与错误码不变。*

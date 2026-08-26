@@ -5,8 +5,9 @@ AUTH_403_FORBIDDEN；全部写审计日志（rag.audit logger，经 security.Mas
 脱敏后落结构化日志）。
 
 异步任务：索引重建经 asyncio.create_task + 进程内注册表真异步执行
-（02 §3.10 tasks 进度轮询契约）；重建语义 = 校验与修复（约束确保/
-索引确保/死信重放），全量重嵌入属 J18 禁热更路径、须管道重跑。
+（02 §3.10 tasks 进度轮询契约）；两档语义：full=True 走「全量重嵌入」
+（采集→管道→三索引，GAP-A3），full=False 走「校验修复」（约束确保/
+索引确保/死信重放）。
 """
 
 # --- 标准库 ---
@@ -92,10 +93,81 @@ def _audit(user: dict[str, object], action: str, detail: str) -> None:
     )
 
 
+async def _run_full_reindex(rec: "_TaskRecord") -> None:
+    """全量重嵌入（GAP-A3 编排入口，full=True）。
+
+    采集（全量扫描）→ P2 parse → P3 clean → P4 chunk → P5 enrich →
+    三索引（Qdrant 向量 / Neo4j 图 / ES 全文）端到端自动执行——
+    这是 admin index/rebuild 的「全量重建」档（J18 禁热更路径）。
+
+    Args:
+        rec: 任务记录（进度/状态回写）。
+    """
+    from app.api.deps import get_embedding_service, get_ingestion_service
+    from app.pipeline.cleaning.pipeline import build_cleaning_pipeline
+    from app.pipeline.config import load_pipeline_config
+    from app.pipeline.graph_construction.graph_writer import GraphWriter
+    from app.pipeline.graph_construction.schema import load_graph_schema
+    from app.pipeline.indexing.fulltext_indexer import ESSyncer
+    from app.db.qdrant_client import QdrantDBClient
+    from app.pipeline.indexing.pipeline_service import PipelineService
+    from app.pipeline.indexing.vector_indexer import VectorIndexer
+    from app.pipeline.parsing.router import FormatRouter
+
+    settings = get_settings()
+    # ① 采集（全量扫描）
+    rec.progress = 0.1
+    ingestion = get_ingestion_service()
+    scan = await ingestion.run(mode="full")
+    documents = ingestion.last_documents
+    audit_log.info(
+        "rebuild full ingestion discovered=%d kept=%d",
+        scan.discovered,
+        len(documents),
+    )
+    if not documents:
+        rec.progress = 1.0
+        return
+
+    # ② 管道 + 三索引
+    rec.progress = 0.3
+    qd = QdrantDBClient(settings.qdrant_host, settings.qdrant_port)
+    neo = Neo4jClient(settings.neo4j_uri, settings.neo4j_user, settings.neo4j_password)
+    await neo.connect()
+    es = ESClient(settings.elasticsearch_host)
+    await es.connect()
+    redis = RedisClient(settings.redis_host, settings.redis_port)
+    await redis.connect()
+    try:
+        service = PipelineService(
+            format_router=FormatRouter(),
+            cleaning_pipeline=build_cleaning_pipeline(),
+            chunking_cfg=load_pipeline_config().pipeline.chunking,
+            vector_indexer=VectorIndexer(qd, await get_embedding_service()),
+            graph_writer=GraphWriter(neo, load_graph_schema()),
+            es_syncer=ESSyncer(es, redis),
+        )
+        stats = await service.index_documents(documents)
+        audit_log.info(
+            "rebuild full done docs=%d chunks=%d vector=%d es=%d failed=%d",
+            stats.documents,
+            stats.chunks,
+            stats.vector_points,
+            stats.fulltext_written,
+            stats.failed,
+        )
+        rec.progress = 1.0
+    finally:
+        await redis.close()
+        await es.close()
+        await neo.close()
+
+
 async def _run_rebuild(task_id: str, scope: str, full: bool) -> None:
     """执行重建任务（后台协程）：校验与修复语义。
 
-    步骤（按 scope 展开，进度逐段推进）：
+    full=True 时走全量重嵌入（_run_full_reindex，scope 忽略）；
+    full=False 时按 scope 逐段校验修复：
       vector   → Qdrant check_health（集合连通性）
       graph    → Neo4j ensure_constraints（唯一约束/索引确保）+ 实体计数
       fulltext → ES ensure_indices + 死信队列重放（ESSyncer）+ 计数
@@ -111,6 +183,12 @@ async def _run_rebuild(task_id: str, scope: str, full: bool) -> None:
     es: ESClient | None = None
     neo: Neo4jClient | None = None
     try:
+        if full:
+            # 全量重嵌入（GAP-A3）：采集→管道→三索引；scope 忽略（管道写全量）
+            await _run_full_reindex(rec)
+            rec.state = "done"
+            rec.progress = 1.0
+            return
         scopes = ["vector", "graph", "fulltext"] if scope == "all" else [scope]
         for i, sc in enumerate(scopes):
             if sc == "vector":

@@ -165,13 +165,13 @@
 |------|------|------|----------|------|
 | GAP-A1 | `app/api/session_store.py` + `sessions.py` | 会话列表/历史/删除的权威源为**进程内 dict**（`_STORE`，181 行模块自带）；全仓扫描 `register_message` 仅测试调用——**生产运行时无任何写入方**；thread↔session 映射只存前端内存（`sessionStore.threadMap`），刷新即丢 | 02 §3.2-3.4：数据源=thread checkpoint（J21）聚合；04 §2：Postgres 为会话状态 SSOT | **会话侧栏永远空**、历史装载永远空、删除会话 404、A-05 级联无从谈起——前端批次 B 的 loadHistory 接线因后端断点而不可达；L2 联调时 S-02 系用例会暴露 |
 | GAP-A2 | `app/api/endpoints/feedback.py:29` | 点踩登记的 query/answer 为占位串（`query=f"session:{session_id}"`，answer 取 reason）——注释自认「完整答案快照随 10.3 会话存储接线补齐」，但 10.3（193a3c7）已提交未补 | D8：bad case 回流是 golden set 迭代的数据源 | bad case 队列记录的是无效内容，D8 回流闭环名存实亡 |
-| GAP-A3 | `app/pipeline/indexing/` | **索引写入管道无编排器**：`IndexUpdater`（updater.py:72/94/107 三处 NotImplementedError）本应协调 vector/graph/fulltext 三 indexer，但无任何生产调用方；graph_construction 六模块（graph_writer 215 行真实现）仅被测试调用；vector_indexer 仅被桩 updater 引用 | 01 阶段 2/3：ingestion→parsing→cleaning→chunking→enrichment→graph 构建→三索引入库 | **文档入库后无任何自动索引路径**——admin preview 端点可逐段手动调用，但端到端「喂文档进系统」不可用；当前系统的检索语料只能靠手工植入 |
+| GAP-A3【已落地】 | `app/pipeline/indexing/` | **索引写入管道无编排器**：`IndexUpdater`（updater.py:72/94/107 三处 NotImplementedError）本应协调 vector/graph/fulltext 三 indexer，但无任何生产调用方；graph_construction 六模块（graph_writer 215 行真实现）仅被测试调用；vector_indexer 仅被桩 updater 引用 | 01 阶段 2/3：ingestion→parsing→cleaning→chunking→enrichment→graph 构建→三索引入库 | **文档入库后无任何自动索引路径**——admin preview 端点可逐段手动调用，但端到端「喂文档进系统」不可用；当前系统的检索语料只能靠手工植入 |
 
 ### B 级 · 契约偏差（行为与文档文义不符）
 
 | 编号 | 位置 | 事实 | 契约文义 |
 |------|------|------|----------|
-| GAP-B1 | `app/api/endpoints/admin.py:95` | `index/rebuild` 实际语义是「校验与修复」：vector 分支仅 `check_health`（不重建集合）、graph 仅 `ensure_constraints`+计数、fulltext 仅死信重放 | 02 §3.10「异步重建」字面语义；docstring 已自曝「全量重嵌入属 J18 禁热更路径，须管道重跑」——但「管道重跑」依赖 GAP-A3 的编排器，目前不存在 |
+| GAP-B1【已落地】 | `app/api/endpoints/admin.py:95` | `index/rebuild` 实际语义是「校验与修复」：vector 分支仅 `check_health`（不重建集合）、graph 仅 `ensure_constraints`+计数、fulltext 仅死信重放 | 02 §3.10「异步重建」字面语义；docstring 已自曝「全量重嵌入属 J18 禁热更路径，须管道重跑」——但「管道重跑」依赖 GAP-A3 的编排器，目前不存在 |
 | GAP-B2 | `app/pipeline/ingestion/manifest.py:96-127` | `PostgresManifestStore` 三个方法全 NotImplementedError；dev 装配 `JsonFileManifestStore`（data/ingest_manifest.json） | 04 §2.3：`doc_documents` 表为处理清单 SSOT（04 已明示 dev 降级，偏差已文档化，此处仅登记） |
 | GAP-B3 | `app/api/endpoints/golden.py` bad case 队列 | `_BAD_CASES: list` 进程内，重启即丢，注释「10.x 迁移 Postgres 持久化」 | D8 暗含持久化要求；与 GAP-A2 同根（会话存储未接线） |
 
@@ -193,8 +193,8 @@ Agent 五节点（query_understanding 规则短路+LLM 合并调用、planner JS
 ### 修复排期建议（并入单元 10.8 后续批次）
 
 - **GAP-A1（首选，约 1 天 · ✅ 已落地 2026-08-26）**：`GET /sessions` 系改读 langgraph-server Threads API（8000 业务面经 langgraph_sdk 代理 8001 `/threads`，thread_id 即 session 锚点，消息经 `/threads/{id}/history` 聚合 original_query/answer）——这是 10.3 的未竟部分，直接解锁 S-02 用例与前端会话体验；同步消灭 GAP-A2 的占位依赖（message_id 有了真实来源）。
-- **GAP-A3（次选，约 1.5 天）**：实现 IndexUpdater 三方法并补一个编排入口（admin `POST /admin/index/rebuild` 的 full 档走真重嵌入，或独立 `ingest` 批处理脚本），串起 ingestion→parsing→cleaning→chunking→enrichment→graph_construction→三索引——这是「系统能吃文档」的前提，也是 L2 联调需要测试语料入库的依赖。
-- **GAP-B1（随 A3）**：rebuild 语义按 docstring 自曝口径修订 02 §3.10（「校验修复」vs「全量重建」两档），消除契约文义偏差。
+- **GAP-A3（次选，约 1.5 天 · ✅ 已落地 2026-08-26）**：新增 PipelineService 编排器（RawDocument→parse→clean→chunk→enrich→三索引）并实现 IndexUpdater 三方法（full_rebuild/incremental/delete_document），admin `POST /admin/index/rebuild` full 档走真重嵌入；删除冗余 graph_indexer 桩（真实现 GraphWriter)。
+- **GAP-B1（随 A3 · ✅ 已落地 2026-08-26）**：rebuild 语义修订 02 §3.10（`full=true` 全量重嵌入 vs `full=false` 校验修复两档），请求/响应字段不变。
 - **C 级**：随批次 C 与阶段 11 契约演进自然消化，无需单独排期。
 
 ## 4. 验收门禁（全部批次完成判定）
@@ -209,4 +209,4 @@ Agent 五节点（query_understanding 规则短路+LLM 合并调用、planner JS
 
 ---
 
-*变更记录：v1.0（2026-08-26）创建：收录全量工程审计确认的 11 项缺陷（BUG-01~11），含根因、最优方案比选与四批次修复计划；证据基准为当日工作区实测门禁输出。v1.1（2026-08-26）修复进度登记：BUG-01~11 全部修复完毕（六笔提交：cee4aa5 R1+R2.3 / c017432 R2.4 / 3246687 R3 / f07cfef R4 / fb20209 批次B / 0a71749 批次D），复验门禁全绿（pytest 395 passed / mypy 0 error / 前端四门禁绿 / doc-lint 双零），各条目标注修复提交号；§3 新增遗留项说明（批次 C 后置、PostgresManifestStore 待阶段 2/3、Admin.tsx debug 接线待 02 §3.7）。v1.2（2026-08-26）新增 §3.5 功能完整性审计（第二轮）：识别 3 项 A 级契约断点（会话持久化闭环断裂 GAP-A1、bad case 快照占位 GAP-A2、索引写入管道无编排器 GAP-A3）、3 项 B 级契约偏差、6 项 C 级计划内未接线；确认读侧（问答主链路）为完整实现，写侧（入库管道/会话持久化）为最小实现；附修复排期建议。v1.3（2026-08-26）GAP-A1 会话接线落地：新增 app/api/thread_store.py（经 langgraph_sdk 代理 langgraph-server /threads，thread_id 即 session 锚点，历史经 get_history 聚合 original_query/answer），sessions 三端点切到 threads 权威源；前端 ensureThread 带 user_id metadata、session_id 统一为 thread_id（去除 s_ 前缀占位与 threadMap）。*
+*变更记录：v1.0（2026-08-26）创建：收录全量工程审计确认的 11 项缺陷（BUG-01~11），含根因、最优方案比选与四批次修复计划；证据基准为当日工作区实测门禁输出。v1.1（2026-08-26）修复进度登记：BUG-01~11 全部修复完毕（六笔提交：cee4aa5 R1+R2.3 / c017432 R2.4 / 3246687 R3 / f07cfef R4 / fb20209 批次B / 0a71749 批次D），复验门禁全绿（pytest 395 passed / mypy 0 error / 前端四门禁绿 / doc-lint 双零），各条目标注修复提交号；§3 新增遗留项说明（批次 C 后置、PostgresManifestStore 待阶段 2/3、Admin.tsx debug 接线待 02 §3.7）。v1.2（2026-08-26）新增 §3.5 功能完整性审计（第二轮）：识别 3 项 A 级契约断点（会话持久化闭环断裂 GAP-A1、bad case 快照占位 GAP-A2、索引写入管道无编排器 GAP-A3）、3 项 B 级契约偏差、6 项 C 级计划内未接线；确认读侧（问答主链路）为完整实现，写侧（入库管道/会话持久化）为最小实现；附修复排期建议。v1.3（2026-08-26）GAP-A1 会话接线落地：新增 app/api/thread_store.py（经 langgraph_sdk 代理 langgraph-server /threads，thread_id 即 session 锚点，历史经 get_history 聚合 original_query/answer），sessions 三端点切到 threads 权威源；前端 ensureThread 带 user_id metadata、session_id 统一为 thread_id（去除 s_ 前缀占位与 threadMap）。v1.4（2026-08-26）GAP-A3 索引管道编排落地：新增 PipelineService（RawDocument→parse→clean→chunk→enrich→三索引）+ IndexUpdater 三方法（含 delete_document 三存储删除）+ admin index/rebuild full 档真重嵌入；删除冗余 graph_indexer 桩；GAP-B1 随 A3 落地（02 §3.10 两档语义澄清）。*
