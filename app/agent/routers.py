@@ -121,7 +121,7 @@ def route_after_tool_router(state: AgentState) -> str:
     Returns:
         目标节点名。
     """
-    if state["token_budget_exhausted"]:
+    if state.get("token_budget_exhausted", False):
         return NODE_GENERATOR
     if _is_direct_answer_only(state):
         return NODE_GENERATOR
@@ -144,7 +144,7 @@ def route_reflect_entry(state: AgentState) -> str:
         目标节点名：短路时 generator（trace 中无 reflector span），
         否则 reflector。
     """
-    if state["token_budget_exhausted"]:
+    if state.get("token_budget_exhausted", False):
         return NODE_GENERATOR
     if state.get("latency_tier") == "fast":
         return NODE_GENERATOR
@@ -171,9 +171,9 @@ def route_after_reflector(state: AgentState) -> str:
     Returns:
         目标节点名（planner / generator）。
     """
-    if state["token_budget_exhausted"]:
+    if state.get("token_budget_exhausted", False):
         return NODE_GENERATOR
-    if state["needs_more_retrieval"] and state["retrieval_rounds"] < MAX_RETRIEVAL_ROUNDS:
+    if state.get("needs_more_retrieval", False) and state.get("retrieval_rounds", 0) < MAX_RETRIEVAL_ROUNDS:
         return NODE_PLANNER
     return NODE_GENERATOR
 
@@ -191,8 +191,8 @@ def route_after_self_correction(state: AgentState) -> str:
         目标节点名（generator / "__end__"）。
     """
     if (
-        state["faithfulness_score"] < FAITHFULNESS_THRESHOLD
-        and state["self_correction_retries"] < MAX_SELF_CORRECTION_RETRIES
+        state.get("faithfulness_score", 1.0) < FAITHFULNESS_THRESHOLD
+        and state.get("self_correction_retries", 0) < MAX_SELF_CORRECTION_RETRIES
     ):
         return NODE_GENERATOR
     return "__end__"
@@ -207,5 +207,5 @@ def _is_direct_answer_only(state: AgentState) -> bool:
     Returns:
         True 表示计划仅含 direct_answer 步骤。
     """
-    plan = state["plan"]
+    plan = state.get("plan") or []
     return len(plan) == 1 and plan[0].tool == "direct_answer"

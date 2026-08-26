@@ -59,6 +59,7 @@ async def write_back_node(state: AgentState) -> dict[str, object]:
     user_id = str(state.get("user_id", "anon-user"))
     question = str(state.get("original_query", state.get("query", "")))
 
+    history_len = 0
     try:
         history_len = len(await stack.working_memory.get_history(session_id))
         # 1) 工作记忆
