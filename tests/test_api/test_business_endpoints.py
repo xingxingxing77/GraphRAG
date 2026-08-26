@@ -161,13 +161,17 @@ class TestFeedbackFlow:
     def test_down_feedback_enters_bad_case_queue(self) -> None:
         from app.api.endpoints.golden import _BAD_CASES
 
+        # GAP-A2：登记真实问答后点踩，bad case 应反查真实快照而非占位
+        session_store.register_message("u-admin", "s1", "user", "清蒸鲈鱼怎么做？")
+        ast_msg = session_store.register_message("u-admin", "s1", "assistant", "大火蒸八分钟。")
+
         app = create_app()
         with TestClient(app) as client:
             resp = client.post(
                 "/api/v1/feedback",
                 json={
                     "session_id": "s1",
-                    "message_id": "m1",
+                    "message_id": ast_msg.message_id,
                     "rating": "down",
                     "reason": "wrong",
                     "comment": "答案不对",
@@ -175,7 +179,9 @@ class TestFeedbackFlow:
                 headers=_auth_headers(),
             )
             assert resp.status_code == 200
-            assert any(c["message_id"] == "m1" for c in _BAD_CASES)
+            case = next(c for c in _BAD_CASES if c["message_id"] == ast_msg.message_id)
+            assert case["query"] == "清蒸鲈鱼怎么做？"
+            assert case["answer"] == "大火蒸八分钟。"
         _BAD_CASES.clear()
 
     def test_up_feedback_no_bad_case(self) -> None:
