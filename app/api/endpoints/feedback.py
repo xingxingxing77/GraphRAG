@@ -22,6 +22,10 @@ from app.core.models import SessionMessage
 
 router = APIRouter()
 
+# 反查历史深度上限：覆盖超长会话（每 run 约产生数个 checkpoint，
+# 500 检查点 ≈ 数十轮问答），避免目标消息落在窗口外静默回退。
+_FEEDBACK_HISTORY_LIMIT = 500
+
 
 async def _resolve_snapshot(
     user_id: str, session_id: str, message_id: str
@@ -41,7 +45,9 @@ async def _resolve_snapshot(
     Returns:
         (query, answer)；无法解析时二者为 None。
     """
-    result = await thread_store.get_messages(user_id, session_id, None, 100)
+    result = await thread_store.get_messages(
+        user_id, session_id, None, _FEEDBACK_HISTORY_LIMIT
+    )
     if result is None:
         return None, None
     messages: list[SessionMessage] = result[0]

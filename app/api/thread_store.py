@@ -140,8 +140,13 @@ async def get_messages(
         logger.warning("langgraph-server get_history 失败（thread=%s）: %s", session_id, exc)
         return None
 
+    # get_history 按时间倒序返回（最新 checkpoint 在前）→ 反转后按时间
+    # 升序处理；同一 run 的中间 checkpoint 均携带 original_query，仅在
+    # query 变化时生成新的用户消息（去重），answer 只在最终 checkpoint
+    # 出现——q_/a_ 成对发射，run 中断（无 answer）时保留挂起的提问。
     messages: list[SessionMessage] = []
-    for state in history:
+    pending_query: SessionMessage | None = None
+    for state in reversed(history):
         values = state.get("values")
         if not isinstance(values, dict):
             continue
@@ -149,16 +154,20 @@ async def get_messages(
         created_at = _parse_dt(state.get("created_at"))
         query = values.get("original_query")
         answer = values.get("answer")
-        if query:
-            messages.append(
-                SessionMessage(
-                    message_id=f"q_{checkpoint_id}",
-                    role="user",
-                    content=str(query),
-                    created_at=created_at,
-                )
+        if query and (pending_query is None or pending_query.content != str(query)):
+            # 上一轮提问未获回答（run 中断）也保留，再开启新一轮。
+            if pending_query is not None:
+                messages.append(pending_query)
+            pending_query = SessionMessage(
+                message_id=f"q_{checkpoint_id}",
+                role="user",
+                content=str(query),
+                created_at=created_at,
             )
         if answer:
+            if pending_query is not None:
+                messages.append(pending_query)
+                pending_query = None
             messages.append(
                 SessionMessage(
                     message_id=f"a_{checkpoint_id}",
@@ -171,6 +180,8 @@ async def get_messages(
                     model=values.get("model"),
                 )
             )
+    if pending_query is not None:
+        messages.append(pending_query)
     return messages, None
 
 
