@@ -16,7 +16,7 @@ import httpx
 # --- 环境默认（与 .env.example / compose 对齐） ---
 API_BASE = os.environ.get("L2_API_BASE", "http://localhost:8000")
 AGENT_BASE = os.environ.get("L2_AGENT_BASE", "http://localhost:8001")
-ASSISTANT_ID = os.environ.get("L2_ASSISTANT", "rag_agent")
+ASSISTANT_ID = os.environ.get("L2_ASSISTANT", "agent")
 ADMIN_USERNAME = os.environ.get("L2_ADMIN_USER", "admin")
 ADMIN_PASSWORD = os.environ.get("L2_ADMIN_PASSWORD", "admin-dev-password")
 
@@ -124,7 +124,7 @@ async def stream_run(
                 "user_id": user_id,
             },
             "config": {"configurable": {"latency_tier": tier, "model": None}},
-            "stream_mode": ["updates", "messages-tuple"],
+            "stream_mode": ["updates", "values"],
             "multitask_strategy": "interrupt",
         }
         cur_event = ""

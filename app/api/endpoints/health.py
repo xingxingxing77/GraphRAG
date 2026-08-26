@@ -11,6 +11,7 @@ Redis 与 Postgres 为 non-critical（D5/J23 降级不阻断）：down 时 /read
 """
 
 # --- 标准库 ---
+import asyncio
 import time
 from typing import Any, Awaitable, Callable
 
@@ -72,19 +73,24 @@ async def _timed(check: Callable[[], Awaitable[bool]]) -> tuple[bool, int]:
 
 
 async def _probe_postgres() -> bool:
-    """Postgres 连通探测（psycopg 异步）。"""
-    import psycopg
+    """Postgres 连通探测（同步 psycopg + to_thread，兼容 Windows ProactorEventLoop）。
 
-    settings = get_settings()
-    conn = await psycopg.AsyncConnection.connect(
-        settings.postgres_dsn, connect_timeout=int(_PROBE_TIMEOUT_S)
-    )
-    try:
-        async with conn.cursor() as cur:
-            await cur.execute("SELECT 1")
-        return True
-    finally:
-        await conn.close()
+    psycopg 异步模式不支持 ProactorEventLoop，故用线程池执行同步连接。
+    """
+
+    def _sync_check() -> bool:
+        import psycopg
+
+        settings = get_settings()
+        conn = psycopg.connect(settings.postgres_dsn, connect_timeout=int(_PROBE_TIMEOUT_S))
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+            return True
+        finally:
+            conn.close()
+
+    return await asyncio.to_thread(_sync_check)
 
 
 async def _probe_http(url: str) -> bool:
@@ -128,8 +134,13 @@ async def readiness_check(
         "ollama": lambda: _probe_http(f"{settings.ollama_base_url}/api/tags"),
     }
 
-    for name, probe in probes.items():
+    # 并行探测（独立_timeout_铁律：互不阻塞）
+    async def _run(name: str, probe: Callable[[], Awaitable[bool]]) -> tuple[str, bool, int]:
         ok, latency = await _timed(probe)
+        return name, ok, latency
+
+    results = await asyncio.gather(*(_run(n, p) for n, p in probes.items()))
+    for name, ok, latency in results:
         if ok:
             components[name] = HealthComponent(status="up", latency_ms=latency)
         elif name in _CRITICAL_COMPONENTS:

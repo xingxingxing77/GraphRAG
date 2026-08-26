@@ -77,8 +77,8 @@ class LeidenDetector:
         """
         # 延迟导入：未安装 pipeline 可选组时给出明确错误
         try:
-            import igraph as ig
-            import leidenalg
+            import igraph as ig  # type: ignore[import-untyped]
+            import leidenalg  # type: ignore[import-untyped]
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError(
                 "社区检测依赖未安装（pyproject pipeline 可选组：igraph/leidenalg）"
