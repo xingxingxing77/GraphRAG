@@ -15,7 +15,7 @@ function CitationMarker({ citation }: { citation: Citation }) {
   return (
     <span className="relative inline-block align-top">
       <button
-        className="mx-0.5 -translate-y-0.5 rounded bg-blue-50 px-0.5 text-[11px] font-semibold text-blue-600 hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900"
+        className="mx-0.5 -translate-y-0.5 rounded-[4px] bg-accent-tint px-0.5 text-[11px] font-semibold text-accent-ink hover:bg-hover"
         onClick={() => setOpen((v) => !v)}
         aria-label={"引用 " + citation.marker}
       >

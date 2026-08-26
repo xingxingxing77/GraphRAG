@@ -5,8 +5,8 @@
 export function RegenerationNotice({ visible }: { visible: boolean }) {
   if (!visible) return null;
   return (
-    <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] text-amber-700 dark:bg-amber-950 dark:text-amber-300">
-      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />
+    <span className="ml-2 inline-flex items-center gap-1 rounded-chip bg-accent-tint px-2 py-0.5 text-[10px] text-accent-ink">
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
       正在复核答案
     </span>
   );

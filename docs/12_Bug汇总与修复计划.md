@@ -6,11 +6,13 @@
 
 ## 0. 摘要
 
+> **修复进度（2026-08-26 复验）**: BUG-01 ~ BUG-11 **全部修复完毕**并已提交（cee4aa5 / c017432 / 3246687 / f07cfef / fb20209 / 0a71749）。复验门禁：mypy --strict 0 error、pytest 全量 395 passed / 13 skipped、前端 typecheck/eslint/build/vitest（16 passed）全绿、doc-lint 0 硬错误 0 软警告、git 工作区干净。本文档其余章节保留原始审计记录作为根因存档；后续新增缺陷按新增 BUG 条目追加。
+
 本轮全量工程审计共确认 **11 项缺陷**（致命 5 / 高 3 / 中 3），全部落在「批次 A 后端收口」的收尾地带与历史遗留区。当前门禁状态：pytest 全绿、前端三门禁全绿、doc-lint 全绿，但 **mypy --strict 余 2 处错误**、**约 1450 行批次 A 改动未提交**、**1 个管理端点漏挂鉴权**。修复总原则：先堵安全面（鉴权漏网），再清类型收尾（mypy 2 处），然后一次性完成批次 A 提交卫生（删除自删失败的一次性补丁脚本、补 .gitignore），最后处置死代码桩与工程卫生项。预计总工作量约 1.5 个工作日，不涉及契约（02/03/04）变更。
 
 ## 1. 缺陷清单
 
-### BUG-01（致命）`GET /admin/qdrant/points` 漏挂鉴权
+### BUG-01（致命）`GET /admin/qdrant/points` 漏挂鉴权 【已修复 cee4aa5】
 
 - **位置**: `app/api/endpoints/qdrant_debug.py:37`
 - **现象**: 端点签名无 `Depends(require_admin)`，函数体内残留 `# TODO: admin 鉴权（10.2）`；且未接 `ensure_debug_enabled()` 开关。
@@ -18,7 +20,7 @@
 - **影响**: 任何持有有效 JWT 的普通用户（甚至无 token 时取决于 `get_qdrant_client` 依赖链）可按 doc_id 遍历全部业务集合的 points **payload 明文**（含正文 chunk、元数据），信息泄露面为 admin 级调试数据。
 - **验证**: `Select-String qdrant_debug.py -Pattern require_admin` → 零命中（其余 14 个 admin 前缀路由文件均已挂载）。
 
-### BUG-02（致命）`SemanticCache.invalidate_doc` 异常路径返回 None 破坏计数契约
+### BUG-02（致命）`SemanticCache.invalidate_doc` 异常路径返回 None 破坏计数契约 【已修复 cee4aa5】
 
 - **位置**: `app/memory/semantic_cache.py:230-231`
 - **现象**: 声明 `-> int`，但 `except Exception: return`（裸 return）。
@@ -26,7 +28,7 @@
 - **影响**: ① mypy --strict 报错（`error: Return value expected`），批次 A 门禁红，阻塞提交；② 运行时异常路径下 `admin cache/clear` 的 `purged` 计数会拿到 None 并在累加处抛 TypeError（`purged = await cache.invalidate_doc(...)` 直接赋值给 int 变量）。
 - **验证**: `mypy --strict app/memory/semantic_cache.py` → 1 error。
 
-### BUG-03（致命）`parsing_preview` 的 `raw_doc` None 收窄缺失
+### BUG-03（致命）`parsing_preview` 的 `raw_doc` None 收窄缺失 【已修复 cee4aa5】
 
 - **位置**: `app/api/endpoints/parsing.py:81`
 - **现象**: `raw_doc: RawDocument | None` 经 if/elif/else 三分支后，mypy 认为仍可能为 None，传入 `_router.parse(raw_doc)` 报 arg-type 错误。
@@ -34,35 +36,35 @@
 - **影响**: mypy --strict 门禁红（`error: Argument 1 to "parse" ... expected "RawDocument"`）。运行时实际不可达 None（404 已提前抛出），故为类型层缺陷而非行为缺陷。
 - **验证**: `mypy --strict app/api/endpoints/parsing.py` → 1 error。
 
-### BUG-04（致命）批次 A 约 1450 行改动滞留工作区未提交
+### BUG-04（致命）批次 A 约 1450 行改动滞留工作区未提交 【已修复 cee4aa5】
 
 - **位置**: git 工作区（admin/security/deps/config/qdrant_client/redis_client/semantic_cache + 11 个端点文件 + 测试 + pyproject）
 - **现象**: 20 个文件已暂存/修改、`app/agent/tools.py` 已删除，但无对应提交；上一次提交停在 `fc9eecb`（10.7 BUI）。
 - **根因**: 开发会话在 mypy 修复中途截断（BUG-02/03 即当时的 2 处遗留），按 01 §6.0「S1 自检未过不得进入 S2」的门禁语义，未达提交条件。
 - **影响**: ① 单点丢失风险——工作区改动无版本保护；② 后续批次（B/C/D）在脏工作区上叠加会放大合并与回滚成本；③ 违反 Conventional Commits 分组提交节奏（01 §4.2）。
 
-### BUG-05（致命）一次性补丁脚本被 `git add` 意外纳入暂存区
+### BUG-05（致命）一次性补丁脚本被 `git add` 意外纳入暂存区 【已修复 cee4aa5/c017432】
 
 - **位置**: `scripts/_patch_auth.py`、`scripts/_fix_auth_params.py`、`scripts/_fix_mypy.py`（均已 `A` 状态）
 - **现象**: 三个脚本头部均注明「执行后自删」/「一次性补丁」，但因会话截断未执行删除，反而进入了暂存区。
 - **根因**: 脚本设计为「补丁完自删」，但删除动作依赖会话继续执行；截断后遗留在 scripts/ 并随批量 `git add` 入暂存。
 - **影响**: 一次性变异脚本入库会成为仓库长期噪音，且其「重跑即重复改写源码」的行为对后续维护者是暗雷（例如 `_patch_auth.py` 重跑会二次插入 user 参数导致语法错误）。
 
-### BUG-06（高）`.langgraph_api/` 运行时状态文件被纳入暂存区
+### BUG-06（高）`.langgraph_api/` 运行时状态文件被纳入暂存区 【已修复 c017432】
 
 - **位置**: `.langgraph_api/`（7 个 `.pckl` 文件，均已 `A` 状态）
 - **现象**: langgraph-server 本地 dev 模式的 checkpoint/store 二进制状态被 git 暂存；`.gitignore` 无对应规则。
 - **根因**: `docker compose` 之外的 `langgraph dev`（或 SDK 初始化）在项目根生成该目录；`.gitignore` 编写时未预见此产物。
 - **影响**: ① 二进制状态文件含会话数据（潜在 PII 面）入库；② 每次运行状态变化都会污染 `git status`，干扰真实改动的审阅。
 
-### BUG-07（高）五个零引用 NotImplementedError 死代码桩模块（约 45 处 TODO）
+### BUG-07（高）五个零引用 NotImplementedError 死代码桩模块（约 45 处 TODO） 【已修复 3246687】
 
 - **位置**: `app/generation/generator.py`（StreamGenerator）、`app/generation/citation.py`（CitationTracker）、`app/pipeline/chunking/semantic_splitter.py`（SemanticSplitter）、`app/pipeline/enrichment/entity_extractor.py`（NEREntityExtractor）、`app/pipeline/enrichment/relation_enricher.py`（RelationEnricher）
 - **现象**: 全仓 63 处 TODO 中的约 45 处集中于上述五个模块；每个类核心方法直接 `raise NotImplementedError`；全仓引用扫描（含 tests）**零外部引用**——实际调用链走的是 `app/agent/nodes/generator.py`（真实现，含引用/Citation 模型）、`app/pipeline/chunking/` 的真实分块器与管道自有实体抽取。
 - **根因**: 阶段 0-2 早期按模块骨架先行创建的占位实现，后续真实实现落在 agent/nodes 与 pipeline 专职模块后，占位件从未清理——与批次 A 已删除的 `app/agent/tools.py`（死桩）同一性质，当时审计清单未覆盖 generation/pipeline 侧。
 - **影响**: ① 约 400 行死代码 + 45 处 TODO 噪音，误导后续维护者与 AI 编码 Agent（AGENT.md 读者会以为这些是待实现任务）；② `neo4j_client.py:134` 的 TODO(阶段 3) 注释指向 04 §5.4 检索模板的说明性占位，与此同类需一并裁决。
 
-### BUG-08（高）Qdrant 客户端版本兼容性 UserWarning
+### BUG-08（高）Qdrant 客户端版本兼容性 UserWarning 【已修复 3246687】
 
 - **位置**: `app/db/qdrant_client.py`（客户端构造）——由 `qdrant_client/async_qdrant_remote.py:231` 发出
 - **现象**: pytest 全量运行时稳定复现 `UserWarning: Failed to obtain server version. Unable to check client-server compatibility`（5 warnings 中 1 类）。
@@ -70,20 +72,20 @@
 - **影响**: 非 failures 但属测试输出噪音；离线/降级场景（J23 语义下 Qdrant down 是明确的运行时态）下每次初始化都产生告警，可能掩盖真实 warning。
 - **验证**: 全量 pytest 输出 warnings 摘要可见。
 
-### BUG-09（中）批次 A 未决功能缺口（已登记待做，非新发现）
+### BUG-09（中）批次 A 未决功能缺口（已登记待做，非新发现） 【已修复 fb20209/0a71749（批次 B+D）】
 
 - **位置**: 前端 `rag-web/src/`（会话历史装载/引用角标/反馈闭环/Markdown 渲染/model 上浮/RegenerationNotice·FaithfulnessBadge）；后端 `Admin.tsx` 调试分区显隐（依赖 02 §3.7 暴露 debug_enabled）
 - **现象与根因**: 见 06 §8.2 与 01 §6.11 单元 10.8 的批次 B/C 定义——会话审计已确认为「实现深度缺口」而非回归性 bug。
 - **影响**: D8 bad case 回流数据源（POST /feedback）断链等；此处仅收录为修复计划的排期锚点，明细以 06 §8.2 为权威。
 
-### BUG-10（中）`debug_enabled` 生产缺省语义与配置可见性
+### BUG-10（中）`debug_enabled` 生产缺省语义与配置可见性 【已修复 f07cfef】
 
 - **位置**: `app/core/config.py`（`debug_enabled: bool = Field(default=True, ...)`）；`.env.example` 无 `DEBUG_ENABLED` 条目；10 §2 环境变量集中表未收录
 - **现象**: 调试端点组开关默认开（True），且示例环境文件未提示需显式关闭。
 - **根因**: 批次 A 为保证 dev 环境调试端点可用取了宽松默认值，但「生产必须关」的约束只存在于代码注释（`SYS_403_DEBUG_DISABLED`），没有落到配置样例与运维文档——配置不可见即约束不生效（05 §6 D7 fail-fast 哲学的反面）。
 - **影响**: 生产部署若照抄 `.env.example`，`/admin/debug/*` 四端点对持有 admin JWT 者默认暴露（叠加 BUG-01 则完全暴露）。
 
-### BUG-11（中）行尾混用与提交卫生
+### BUG-11（中）行尾混用与提交卫生 【已修复 f07cfef（.gitattributes 归一）】
 
 - **位置**: 仓库级——工作区改动中 `semantic_cache.py` 为 LF、其余 6 个核心文件为 CRLF；docs/ 七份文档每次 `git add` 均报「LF will be replaced by CRLF」
 - **现象**: 无 `.gitattributes`，Windows 工作区 CRLF 与仓库 LF 内容混杂，git 每次触碰都产生转换告警并可能在 diff 中引入整文件行尾噪音。
@@ -145,7 +147,13 @@
 | R4.2 | 新增 `.gitattributes`（`* text=auto eol=lf` + 二进制例外）+ 一次性行尾归一化提交 | BUG-11 |
 | R4.3 | 提交：`fix(infra): debug开关改fail-closed缺省+行尾策略归一` | — |
 
-**后续（非本轮范围，排期锚点）**：BUG-09 的批次 B（前端功能补全）按 01 §6.11 单元 10.8 既定计划执行——会话历史装载 → 引用体系 → 反馈闭环 → Markdown → model 上浮 → vitest 引入；批次 C（BUI 业务包装）后置定案不变。
+**进度登记（2026-08-26 复验）**：批次 R1-R4 与批次 B/D 已全部执行完毕（六笔提交见 §0 摘要），验收门禁 1-5、7 已达成；门禁 6 的鉴权用例随 cee4aa5 合入。当前遗留项（均为计划内后置，非缺陷回归）：
+
+1. **批次 C（BUI 业务包装）**：按用户定案后置，入口在 06 §8.2 / §10.4——bui/ 20 件已落地但 MessageBubble/ThoughtPanel/输入区尚未接线（引用扫描确认业务组件暂未 import bui/ 运行时件）；
+2. **`Admin.tsx` 调试分区显隐**：依赖 02 §3.7 暴露 `debug_enabled` 的契约变更，属阶段 11 契约演进项，前端占位注释保留；
+3. **`PostgresManifestStore`**（`app/pipeline/ingestion/manifest.py` 真实现）与 `WebLoader`（loader.py:173 网页爬取）：标注「阶段 2/3 接线」，当前 dev 装配 `JsonFileManifestStore` 为设计内降级路径（deps.py 注释明示）；
+4. **`IndexUpdater` / `GraphIndexer` 桩**：graph_indexer.py 的 NotImplementedError 属阶段 3 图谱写入单元（真实写入链路在 graph_construction/graph_writer.py 且有测试覆盖），TODO 保留为阶段任务锚点；
+5. **main.py lifespan 初始化 TODO（5 处）**：客户端经 deps 懒加载装配（05 §6 D7），lifespan 集中初始化属性能优化项，非功能缺陷。
 
 ## 4. 验收门禁（全部批次完成判定）
 
@@ -159,4 +167,4 @@
 
 ---
 
-*变更记录：v1.0（2026-08-26）创建：收录全量工程审计确认的 11 项缺陷（BUG-01~11），含根因、最优方案比选与四批次修复计划；证据基准为当日工作区实测门禁输出。*
+*变更记录：v1.0（2026-08-26）创建：收录全量工程审计确认的 11 项缺陷（BUG-01~11），含根因、最优方案比选与四批次修复计划；证据基准为当日工作区实测门禁输出。v1.1（2026-08-26）修复进度登记：BUG-01~11 全部修复完毕（六笔提交：cee4aa5 R1+R2.3 / c017432 R2.4 / 3246687 R3 / f07cfef R4 / fb20209 批次B / 0a71749 批次D），复验门禁全绿（pytest 395 passed / mypy 0 error / 前端四门禁绿 / doc-lint 双零），各条目标注修复提交号；§3 新增遗留项说明（批次 C 后置、PostgresManifestStore 待阶段 2/3、Admin.tsx debug 接线待 02 §3.7）。*

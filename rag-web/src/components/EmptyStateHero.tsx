@@ -14,11 +14,11 @@ import { useConfigStore } from "@/stores/configStore";
 
 /** 输入框样式（空态大框与会话态停靠条共用，compact 收窄）。 */
 const COMPOSER_BOX =
-  "w-full rounded-2xl border border-neutral-200 bg-white shadow-sm transition-colors focus-within:border-neutral-300 dark:border-neutral-700 dark:bg-neutral-800";
+  "w-full rounded-card border border-line bg-surface shadow-card transition-colors focus-within:border-line-strong";
 const COMPOSER_TEXTAREA =
-  "w-full resize-none bg-transparent text-sm outline-none placeholder:text-neutral-400";
+  "w-full resize-none bg-transparent text-[13px] leading-[18px] text-ink outline-none placeholder:text-ink-3";
 const CHIP_SELECT =
-  "rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs text-neutral-600 outline-none hover:border-neutral-300 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300";
+  "rounded-chip border border-line bg-field px-3 py-1 text-xs text-ink-2 outline-none hover:border-line-strong";
 
 /** Composer Props。 */
 export interface ComposerProps {
@@ -63,7 +63,7 @@ export function Composer({ compact = false, onSubmit }: ComposerProps) {
       <div className={`flex items-center ${compact ? "px-2.5 pb-2" : "px-3 pb-2.5"}`}>
         <span className="flex-1" />
         <button
-          className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-500 text-white transition-colors hover:bg-blue-600 disabled:opacity-40"
+          className="flex h-8 w-8 items-center justify-center rounded-control bg-ink text-surface transition-[background-color,color,transform] hover:bg-ink-2 active:scale-[0.94] disabled:bg-line-strong disabled:text-ink-2"
           disabled={!value.trim()}
           onClick={submit}
           aria-label="发送"
@@ -106,7 +106,7 @@ export function EmptyStateHero({ suggestions, onSubmit }: EmptyStateHeroProps) {
   return (
     <div className="flex h-full flex-col items-center justify-center px-6">
       {/* 标语文案（无 logo / 无版本徽章） */}
-      <h1 className="mb-8 text-2xl font-semibold tracking-tight">hi GraphRAG</h1>
+      <h1 className="mb-8 text-2xl font-semibold tracking-tight text-ink">hi GraphRAG</h1>
 
       {/* chips：档位 + 模型（prompt-bar 落点） */}
       <div className="mb-4 flex items-center gap-2">
@@ -148,7 +148,7 @@ export function EmptyStateHero({ suggestions, onSubmit }: EmptyStateHeroProps) {
         {(suggestions.length > 0 ? suggestions : DEFAULT_SUGGESTIONS).map((s) => (
           <button
             key={s}
-            className="rounded-xl border border-neutral-200 bg-white px-3.5 py-2 text-xs text-neutral-600 shadow-sm transition-colors hover:border-neutral-300 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+            className="rounded-card border border-line bg-surface px-3.5 py-2 text-xs text-ink-2 shadow-card transition-colors hover:border-line-strong hover:text-ink-2"
             onClick={() => onSubmit(s)}
           >
             {s}

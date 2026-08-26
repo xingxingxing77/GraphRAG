@@ -5,7 +5,7 @@
 export function FaithfulnessBadge({ score }: { score: number }) {
   const pct = Math.round(score * 100);
   return (
-    <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] text-green-700 dark:bg-green-950 dark:text-green-300">
+    <span className="ml-2 inline-flex items-center gap-1 rounded-chip bg-green-tint px-2 py-0.5 text-[10px] text-green">
       已复核 {pct}%
     </span>
   );
