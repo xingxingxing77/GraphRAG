@@ -6,6 +6,7 @@ POST /admin/cleaning/preview —— 清洗前后对比预览（diff 高亮被删
 
 # --- 第三方库 ---
 from fastapi import APIRouter, Depends
+from app.api.security import require_admin
 
 # --- 本地模块 ---
 from app.api.deps import get_ingestion_service
@@ -42,6 +43,7 @@ def _removed_spans(before: str, after: str) -> list[str]:
 async def cleaning_preview(
     request: CleaningPreviewRequest,
     service: IngestionService = Depends(get_ingestion_service),
+    user: dict[str, object] = Depends(require_admin),
 ) -> CleaningPreviewResponse:
     """清洗前后对比预览。
 
@@ -55,7 +57,6 @@ async def cleaning_preview(
     Raises:
         ApiError: SYS_404_NOT_FOUND（doc_id 不在最近批次）。
     """
-    # TODO: admin 鉴权 + SYS_403_DEBUG_DISABLED 生产开关（10.2/10.6）
     raw_doc = next(
         (d for d in service.last_documents if d.doc_id == request.doc_id), None
     )

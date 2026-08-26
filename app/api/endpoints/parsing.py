@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 # --- 第三方库 ---
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from app.api.security import require_admin
 
 # --- 本地模块 ---
 from app.api.deps import get_ingestion_service
@@ -30,6 +31,7 @@ async def parsing_preview(
     doc_id: str | None = Form(default=None),
     file: UploadFile | None = File(default=None),
     service: IngestionService = Depends(get_ingestion_service),
+    user: dict[str, object] = Depends(require_admin),
 ) -> ParsingPreviewResponse:
     """解析预览：multipart 上传样例文件，或按 doc_id 取最近采集文档。
 
@@ -44,10 +46,9 @@ async def parsing_preview(
     Raises:
         HTTPException: 400 缺少输入或格式不支持。
     """
-    # TODO: admin 鉴权 + SYS_403_DEBUG_DISABLED 生产开关（10.2/10.6）
     if file is not None and file.filename:
         raw_bytes = await file.read()
-        raw_doc = RawDocument(
+        raw_doc: RawDocument = RawDocument(
             doc_id=deterministic_doc_id(file.filename),
             source_path=file.filename,
             raw_bytes=raw_bytes,
@@ -56,10 +57,10 @@ async def parsing_preview(
             content_hash=hashlib.sha256(raw_bytes).hexdigest(),
         )
     elif doc_id:
-        raw_doc = next(
+        candidate = next(
             (d for d in service.last_documents if d.doc_id == doc_id), None
         )
-        if raw_doc is None:
+        if candidate is None:
             raise HTTPException(
                 status_code=404,
                 detail={
@@ -67,6 +68,7 @@ async def parsing_preview(
                     "message": f"doc_id 未在最近采集批次中: {doc_id}",
                 },
             )
+        raw_doc = candidate
     else:
         raise HTTPException(
             status_code=400,

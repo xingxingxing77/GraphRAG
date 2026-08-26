@@ -119,3 +119,16 @@ async def require_admin(user: dict[str, Any] = Depends(get_current_user)) -> dic
     if user.get("role") != "admin":
         raise ApiError(ErrorCode.AUTH_403_FORBIDDEN, "仅 admin 可访问")
     return user
+
+
+def ensure_debug_enabled() -> None:
+    """调试开关门禁（02 §3.11 SYS_403_DEBUG_DISABLED）。
+
+    供 /admin/debug/* 与管道预览端点在业务逻辑前调用；
+    settings.debug_enabled=False（生产）时整体禁用。
+
+    Raises:
+        ApiError: SYS_403_DEBUG_DISABLED（生产禁用态）。
+    """
+    if not get_settings().debug_enabled:
+        raise ApiError(ErrorCode.SYS_403_DEBUG_DISABLED, "调试端点已在生产禁用")

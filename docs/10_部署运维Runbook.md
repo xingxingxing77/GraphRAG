@@ -49,6 +49,16 @@ curl -s http://localhost:8000/ready | jq '.status, .components'
 - 响应头汇总 `X-Degraded`（多值逗号分隔）即当前降级态（见 §5）。
 - `status ∈ up | degraded | down`；`ready` 全绿 = 所有组件 up。
 
+**环境就绪后的 L2 联调自测**（01 §6.11 单元 10.4，用户环境落地后执行）：
+
+```bash
+docker compose up -d                 # 五存储 + app:8000 + langgraph-server:8001
+# .env 填真实密钥（JWT_SECRET 双服务一致、LLM/Tavily Key 按需）
+curl http://localhost:8000/ready     # 全绿前置
+python scripts/l2_smoke.py           # 人工演示口径（三档基准对话，逐项 PASS/FAIL）
+pytest tests/integration -v          # 正式断言口径（S-01~S-04）
+```
+
 ## 4. 存储备份与恢复
 
 > schema/命名以 `04_数据库设计.md` 为权威；本节为运维操作命令。
@@ -105,4 +115,4 @@ SSE 流内 `X-Degraded` 启动即知 + `values.degraded_reasons` 终态；REST �
 
 ---
 
-*变更记录：v1.0（2026-08-23）依据架构 D9 / 01 §7 / 04 / 02 §2.4·§3.9 / 03 §5 创建，补齐 G7 运维缺口。*
+*变更记录：v1.0（2026-08-23）依据架构 D9 / 01 §7 / 04 / 02 §2.4·§3.9 / 03 §5 创建，补齐 G7 运维缺口。v1.1（2026-08-26）§3 新增环境就绪后的 L2 联调自测路径（docker compose 全栈 + .env 真实密钥 + /ready 全绿 → scripts/l2_smoke.py / pytest tests/integration 双口径），对齐单元 10.4 harness 交付。*

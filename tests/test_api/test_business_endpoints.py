@@ -190,3 +190,14 @@ class TestPublicConfig:
                 assert set(m.keys()) == {"id", "label", "provider"}  # 无敏感字段
             assert body["latency_tiers"] == ["fast", "standard", "deep"]
             assert "llm_extract" in body["compression_strategies"]
+
+
+class TestQdrantDebugAuth:
+    """单元 10.8 批次 A BUG-01 收口：GET /admin/qdrant/points 漏挂鉴权修复（02 §3.11）。"""
+
+    def test_qdrant_points_requires_auth(self) -> None:
+        """裸访（无 token）返回 401，不泄露 points payload（BUG-01）。"""
+        app = create_app()
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/admin/qdrant/points", params={"doc_id": "d1"})
+            assert resp.status_code == 401

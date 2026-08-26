@@ -13,6 +13,7 @@ import time
 
 # --- 第三方库 ---
 from fastapi import APIRouter, Depends
+from app.api.security import ensure_debug_enabled, require_admin
 
 # --- 本地模块 ---
 from app.api.deps import (
@@ -59,6 +60,7 @@ router = APIRouter()
 async def embed_probe(
     request: EmbedProbeRequest,
     embedding: EmbeddingService = Depends(get_embedding_service),
+    user: dict[str, object] = Depends(require_admin),
 ) -> EmbedProbeResponse:
     """向量探针：输入文本，返回 dense 维数 / sparse 键数 / 耗时。
 
@@ -72,7 +74,7 @@ async def embed_probe(
     Raises:
         ApiError: SYS_503_DEPENDENCY_DOWN（Ollama/模型服务不可用）。
     """
-    # TODO: admin 鉴权 + SYS_403_DEBUG_DISABLED 生产开关（10.2/10.6）
+    ensure_debug_enabled()
     started = time.perf_counter()
     try:
         result = await embedding.embed([request.text])
@@ -93,6 +95,7 @@ async def embed_probe(
 async def ik_analyze(
     request: IkAnalyzeRequest,
     es: ESClient = Depends(get_es_client),
+    user: dict[str, object] = Depends(require_admin),
 ) -> IkAnalyzeResponse:
     """IK 分词调试（封装 _analyze API）。
 
@@ -106,7 +109,7 @@ async def ik_analyze(
     Raises:
         ApiError: GRAPH_503_STORE_UNAVAILABLE（ES 不可用）。
     """
-    # TODO: admin 鉴权（10.2）
+    ensure_debug_enabled()
     try:
         await es.ensure_indices()
         tokens = await es.analyze(request.index, request.text, analyzer="ik_smart")
@@ -124,6 +127,7 @@ async def debug_retrieve(
     neo4j: Neo4jClient = Depends(get_neo4j_client),
     es: ESClient = Depends(get_es_client),
     embedding: EmbeddingService = Depends(get_embedding_service),
+    user: dict[str, object] = Depends(require_admin),
 ) -> DebugRetrieveResponse:
     """六路检索调试（sources 过滤 + 分组返回 + 融合 Top-N，单元 3.5）。
 
@@ -143,7 +147,7 @@ async def debug_retrieve(
     Raises:
         ApiError: DEBUG_400_INVALID_SOURCE（sources 含非法源）。
     """
-    # TODO: admin 鉴权（10.2）
+    ensure_debug_enabled()
     all_sources = set(SourceKind)
     requested = set(request.sources) if request.sources else all_sources
     unsupported = requested - all_sources
@@ -196,6 +200,7 @@ async def debug_retrieve(
 async def debug_rerank(
     request: DebugRerankRequest,
     reranker: BGEReranker = Depends(get_reranker),
+    user: dict[str, object] = Depends(require_admin),
 ) -> DebugRerankResponse:
     """精排对比调试（02 §3.11，单元 4.1）。
 
@@ -208,7 +213,7 @@ async def debug_rerank(
     Returns:
         DebugRerankResponse: 精排后列表 + 降级标志 + 耗时。
     """
-    # TODO: admin 鉴权（10.2）
+    ensure_debug_enabled()
     docs = [
         RetrievalResult(
             result_id=f"debug:{i}",

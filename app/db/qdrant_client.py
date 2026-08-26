@@ -250,7 +250,7 @@ class QdrantDBClient:
         collection_name: str,
         key: str,
         value: Any,
-    ) -> None:
+    ) -> int:
         """按 payload 字段精确匹配删除（数组字段为包含语义）。
 
         记忆层使用：rag_cache 按 matched_doc_ids 反查失效（04 §7）、
@@ -260,15 +260,35 @@ class QdrantDBClient:
             collection_name: Collection 名称。
             key: payload 字段名。
             value: 匹配值（payload 为数组时命中含该值的点）。
+
+        Returns:
+            实际删除的点数（集合不存在时返回 0；admin cache/clear
+            purged 计数来源，02 §3.10）。
         """
         client = await self._ensure_client()
         if not await client.collection_exists(collection_name):
-            return
+            return 0
         flt = Filter(must=[FieldCondition(key=key, match=MatchValue(value=value))])
-        await client.delete(
-            collection_name=collection_name,
-            points_selector=FilterSelector(filter=flt),
-        )
+        deleted = 0
+        offset: Any = None
+        while True:
+            records, offset = await client.scroll(
+                collection_name=collection_name,
+                scroll_filter=flt,
+                limit=500,
+                with_payload=False,
+            )
+            if not records:
+                break
+            ids = [r.id for r in records]
+            await client.delete(
+                collection_name=collection_name,
+                points_selector=PointIdsList(points=ids),
+            )
+            deleted += len(ids)
+            if offset is None:
+                break
+        return deleted
 
     async def delete_created_before(
         self,

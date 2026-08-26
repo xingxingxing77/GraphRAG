@@ -9,6 +9,7 @@ GET  /admin/ingestion/scans —— 扫描结果列表
 
 # --- 第三方库 ---
 from fastapi import APIRouter, Depends
+from app.api.security import require_admin
 
 # --- 本地模块 ---
 from app.api.deps import get_ingestion_service
@@ -22,6 +23,7 @@ router = APIRouter()
 async def run_ingestion(
     request: IngestionRunRequest = IngestionRunRequest(),
     service: IngestionService = Depends(get_ingestion_service),
+    user: dict[str, object] = Depends(require_admin),
 ) -> TaskAccepted:
     """触发采集扫描（full | incremental）。
 
@@ -35,7 +37,6 @@ async def run_ingestion(
     Returns:
         TaskAccepted: task_id = 本次 scan_id。
     """
-    # TODO: admin 鉴权 + 审计日志（10.2）
     record = await service.run(mode=request.mode)
     return TaskAccepted(task_id=record.scan_id)
 
@@ -45,6 +46,7 @@ async def list_scans(
     cursor: str | None = None,
     limit: int = 20,
     service: IngestionService = Depends(get_ingestion_service),
+    user: dict[str, object] = Depends(require_admin),
 ) -> Paged[ScanRecord]:
     """扫描结果列表（新→旧，骨架阶段内存分页）。
 
@@ -55,7 +57,6 @@ async def list_scans(
     Returns:
         Paged[ScanRecord]: discovered/changed/deduped 变更计数。
     """
-    # TODO: admin 鉴权（10.2）
     log = service.scan_log()
     start = int(cursor) if cursor else 0
     page = log[start : start + limit]

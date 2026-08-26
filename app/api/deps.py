@@ -8,9 +8,9 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, AsyncGenerator
+import logging
 
 # --- 第三方库 ---
-from langgraph.graph.state import CompiledStateGraph
 
 # --- 本地模块 ---
 from app.core.config import AppSettings, get_settings
@@ -19,6 +19,7 @@ from app.db.es_client import ESClient
 from app.db.qdrant_client import QdrantDBClient
 from app.db.redis_client import RedisClient
 from app.embedding.base import EmbeddingService
+from app.embedding.flag_client import FlagClient
 from app.embedding.ollama_client import OllamaClient
 from app.embedding.service import BgeM3EmbeddingService
 from app.memory.working_memory import WorkingMemory
@@ -133,10 +134,16 @@ async def get_embedding_service() -> EmbeddingService:
     if _embedding_service is None:
         settings = get_settings()
         ollama_client = OllamaClient(base_url=settings.ollama_base_url)
+        flag_client: FlagClient | None
+        try:
+            flag_client = FlagClient()  # sparse 通道（进程内 BGE-M3，H1/J3）
+        except Exception as exc:  # noqa: BLE001 - FlagEmbedding 未装/模型缺失时降级
+            logging.getLogger(__name__).warning("FlagClient 初始化失败，sparse 通道降级: %s", exc)
+            flag_client = None
         _embedding_service = BgeM3EmbeddingService(
             ollama_client=ollama_client,
             model_name=settings.embedding_model,
-            flag_client=None,  # TODO(阶段 3): FlagEmbedding 安装后接入 sparse 通道
+            flag_client=flag_client,
         )
     return _embedding_service
 
@@ -144,14 +151,6 @@ async def get_embedding_service() -> EmbeddingService:
 _embedding_service: BgeM3EmbeddingService | None = None
 
 
-async def get_agent() -> "CompiledStateGraph[Any]":
-    """获取编译后的 LangGraph Agent 实例（依赖注入）。
-
-    Returns:
-        CompiledStateGraph: 编译后的 Agent 状态图。
-    """
-    # TODO: 返回 Agent 单例
-    raise NotImplementedError
 
 
 _ingestion_service: IngestionService | None = None

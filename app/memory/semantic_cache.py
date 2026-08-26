@@ -16,6 +16,7 @@ single-flight：同键并发 miss 合并为一次回源加载（11 路线图 Pha
 import asyncio
 import hashlib
 import json
+import logging
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -29,6 +30,8 @@ from app.core.models import Citation
 from app.db.qdrant_client import QdrantDBClient
 from app.db.redis_client import RedisClient
 from app.embedding.base import EmbeddingService
+
+logger = logging.getLogger(__name__)
 
 # L1 命中阈值（H2：top-1 score ≥ 0.95）
 L1_HIT_THRESHOLD = 0.95
@@ -214,18 +217,22 @@ class SemanticCache:
         except Exception:  # noqa: BLE001 - 写失败不影响主链路
             return
 
-    async def invalidate_doc(self, doc_id: str) -> None:
-        """按文档反查清除受影响的 L1 条目（04 §7 失效联动）。
+    async def invalidate_doc(self, doc_id: str) -> int:
+        """按文档 ID 反查失效受影响的 L1 条目（04 §7 失效联动）。
 
         Args:
-            doc_id: 变更/删除的文档 ID。
+            doc_id: 新增/删除的文档 ID。
+
+        Returns:
+            删除的缓存条目数（admin cache/clear purged 计数来源）。
         """
         try:
-            await self.qdrant.delete_by_payload_match(
+            return await self.qdrant.delete_by_payload_match(
                 RAG_CACHE_COLLECTION, "matched_doc_ids", doc_id
             )
-        except Exception:  # noqa: BLE001 - 失效联动失败不阻塞主流程
-            return
+        except Exception as exc:  # noqa: BLE001 - 失效联动失败不阻塞主流程
+            logger.warning("invalidate_doc 失效联动失败（doc_id=%s）: %s", doc_id, exc)
+            return 0
 
     async def purge_expired(self, now: int | None = None) -> int:
         """清理过期 L1 点（应用层定时任务，Qdrant 无原生 TTL）。

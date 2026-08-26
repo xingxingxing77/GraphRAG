@@ -7,6 +7,7 @@ title_path 显示）。
 
 # --- 第三方库 ---
 from fastapi import APIRouter, Depends
+from app.api.security import require_admin
 
 # --- 本地模块 ---
 from app.api.deps import get_ingestion_service
@@ -26,6 +27,7 @@ _format_router = FormatRouter()
 async def chunking_preview(
     request: ChunkingPreviewRequest,
     service: IngestionService = Depends(get_ingestion_service),
+    user: dict[str, object] = Depends(require_admin),
 ) -> ChunkingPreviewResponse:
     """分块边界预览：按 doc_id 取最近采集文档，解析→清洗→分块。
 
@@ -39,7 +41,6 @@ async def chunking_preview(
     Raises:
         ApiError: SYS_404_NOT_FOUND（doc_id 不在最近批次）。
     """
-    # TODO: admin 鉴权 + SYS_403_DEBUG_DISABLED 生产开关（10.2/10.6）
     raw_doc = next(
         (d for d in service.last_documents if d.doc_id == request.doc_id), None
     )

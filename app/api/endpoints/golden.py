@@ -12,7 +12,8 @@ import io
 from datetime import datetime, timezone
 
 # --- 第三方库 ---
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+from app.api.security import require_admin
 from fastapi.responses import StreamingResponse
 
 router = APIRouter()
@@ -71,6 +72,7 @@ def _render_csv(since: str | None) -> str:
 @router.get("/golden/export")
 async def export_golden(
     since: str | None = Query(default=None, description="ISO 时间过滤"),
+    user: dict[str, object] = Depends(require_admin),
 ) -> StreamingResponse:
     """导出点踩 bad case 清单（CSV 流，golden 回流）。
 
@@ -80,7 +82,6 @@ async def export_golden(
     Returns:
         StreamingResponse: text/csv 流。
     """
-    # TODO: admin 鉴权（10.2）；Postgres 持久化读取（10.x）
     content = _render_csv(since)
     return StreamingResponse(
         iter([content]),

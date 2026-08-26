@@ -6,6 +6,7 @@ GET /admin/communities —— 社区摘要只读浏览（level 过滤，游标�
 
 # --- 第三方库 ---
 from fastapi import APIRouter, Depends, Query
+from app.api.security import require_admin
 from neo4j.exceptions import Neo4jError, ServiceUnavailable
 
 # --- 本地模块 ---
@@ -23,6 +24,7 @@ async def list_communities(
     cursor: str | None = Query(default=None, description="游标（偏移量）"),
     limit: int = Query(default=20, le=100),
     client: Neo4jClient = Depends(get_neo4j_client),
+    user: dict[str, object] = Depends(require_admin),
 ) -> Paged[CommunitySummaryItem]:
     """社区摘要列表（新→旧，按 level/成员数排序）。
 
@@ -38,7 +40,6 @@ async def list_communities(
     Raises:
         ApiError: GRAPH_503_STORE_UNAVAILABLE（Neo4j 不可用）。
     """
-    # TODO: admin 鉴权（10.2）
     offset = int(cursor) if cursor else 0
     where = "WHERE m.level = $level" if level is not None else ""
     cypher = (

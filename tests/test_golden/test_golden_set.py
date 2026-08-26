@@ -80,18 +80,37 @@ class TestRegressionBlocking:
 
 
 class TestGoldenExport:
-    """导出端点（02 §3.11）。"""
+    """导出端点（02 §3.11；require_admin 挂载后需 admin JWT，单元 10.6 A2）。"""
+
+    def _admin_headers(self, client: TestClient) -> dict[str, str]:
+        """兑换 admin JWT（password grant 开发凭证，02 §3.1）。"""
+        resp = client.post(
+            "/api/v1/auth/token",
+            json={"grant_type": "password", "username": "admin", "password": "admin-dev-password"},
+        )
+        assert resp.status_code == 200, resp.text
+        return {"Authorization": f"Bearer {resp.json()['access_token']}"}
 
     def test_export_csv_headers(self) -> None:
         from app.main import create_app
 
         app = create_app()
         with TestClient(app) as client:
-            resp = client.get("/api/v1/admin/golden/export")
+            headers = self._admin_headers(client)
+            resp = client.get("/api/v1/admin/golden/export", headers=headers)
             assert resp.status_code == 200
             assert resp.headers["content-type"].startswith("text/csv")
             first_line = resp.text.splitlines()[0]
             assert first_line == "session_id,message_id,query,answer,created_at"
+
+    def test_export_requires_admin(self) -> None:
+        """未带 token → 401（A2 鉴权挂载回归）。"""
+        from app.main import create_app
+
+        app = create_app()
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/admin/golden/export")
+            assert resp.status_code == 401
 
     def test_record_and_export_roundtrip(self) -> None:
         from app.api.endpoints.golden import _BAD_CASES, record_bad_case
@@ -101,7 +120,8 @@ class TestGoldenExport:
         try:
             app = create_app()
             with TestClient(app) as client:
-                resp = client.get("/api/v1/admin/golden/export")
+                headers = self._admin_headers(client)
+                resp = client.get("/api/v1/admin/golden/export", headers=headers)
                 assert "清蒸鲈鱼怎么做" in resp.text
                 assert "错误答案" in resp.text
         finally:

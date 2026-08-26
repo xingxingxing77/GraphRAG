@@ -82,5 +82,5 @@ python_version = "3.13"
 [[tool.mypy.overrides]]
 # 无类型标注的三方库（FlagEmbedding 进程内 BGE-M3/reranker，H1；
 # tavily Web 检索主轨，J4）——跳过 stub 分析
-module = ["FlagEmbedding", "tavily.*"]
+module = ["FlagEmbedding", "tavily.*", "langdetect.*"]
 ignore_missing_imports = true

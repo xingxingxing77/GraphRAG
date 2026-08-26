@@ -6,6 +6,7 @@ GET /admin/qdrant/points —— 按 doc_id 查 points（payload 查看）。
 
 # --- 第三方库 ---
 from fastapi import APIRouter, Depends, Query
+from app.api.security import ensure_debug_enabled, require_admin
 
 # --- 本地模块 ---
 from app.api.deps import get_qdrant_client
@@ -23,6 +24,7 @@ async def list_points(
     doc_id: str = Query(..., description="文档 ID"),
     limit: int = Query(default=100, le=500),
     client: QdrantDBClient = Depends(get_qdrant_client),
+    user: dict[str, object] = Depends(require_admin),
 ) -> QdrantPointsResponse:
     """按 doc_id 查询全部业务集合中的 points。
 
@@ -34,7 +36,7 @@ async def list_points(
     Returns:
         QdrantPointsResponse: points 列表（含 payload）。
     """
-    # TODO: admin 鉴权（10.2）
+    ensure_debug_enabled()
     points: list[QdrantPointItem] = []
     try:
         collections = await client.list_collections()

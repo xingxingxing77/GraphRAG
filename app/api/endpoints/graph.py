@@ -7,6 +7,7 @@ GET /graph/subgraph —— 后端代理 Cypher 子图查询并序列化为 NVL �
 
 # --- 第三方库 ---
 from fastapi import APIRouter, Depends, Query
+from app.api.security import get_current_user
 from neo4j.exceptions import Neo4jError, ServiceUnavailable
 from neo4j.graph import Node, Relationship
 
@@ -48,8 +49,8 @@ def _rel_to_graph_relationship(rel: Relationship, id_map: dict[str, str]) -> Gra
         GraphRelationship。
     """
     return GraphRelationship(
-        source=id_map.get(rel.start_node.element_id, rel.start_node.element_id),
-        target=id_map.get(rel.end_node.element_id, rel.end_node.element_id),
+        source=id_map.get(rel.start_node.element_id, rel.start_node.element_id) if rel.start_node else "",
+        target=id_map.get(rel.end_node.element_id, rel.end_node.element_id) if rel.end_node else "",
         type=rel.type,
     )
 
@@ -60,6 +61,7 @@ async def get_subgraph(
     depth: int = Query(default=2, le=3, description="扩展深度，上限 3"),
     limit: int = Query(default=50, le=200, description="节点数上限 200"),
     client: Neo4jClient = Depends(get_neo4j_client),
+    user: dict[str, object] = Depends(get_current_user),
 ) -> SubgraphResponse:
     """按实体查询可视化子图（@neo4j-nvl/react 直接可用格式）。
 
@@ -75,7 +77,6 @@ async def get_subgraph(
     Raises:
         ApiError: GRAPH_404_ENTITY_NOT_FOUND / GRAPH_503_STORE_UNAVAILABLE。
     """
-    # TODO: JWT 鉴权依赖注入（10.2）
     depth = max(1, min(depth, 3))
     # depth 为已校验的小整数，拼接安全；实体名经参数化防注入
     cypher = (
@@ -120,6 +121,11 @@ async def get_subgraph(
     relationships = [
         _rel_to_graph_relationship(r, id_map)
         for r in raw_rels
-        if r.start_node.element_id in id_map and r.end_node.element_id in id_map
+        if (
+            r.start_node
+            and r.end_node
+            and r.start_node.element_id in id_map
+            and r.end_node.element_id in id_map
+        )
     ]
     return SubgraphResponse(nodes=nodes, relationships=relationships)

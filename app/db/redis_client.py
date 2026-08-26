@@ -238,3 +238,24 @@ class RedisClient:
             return bool(await client.ping())
         except Exception:  # noqa: BLE001 - 健康检查不抛错
             return False
+
+    async def scan_and_delete(self, pattern: str) -> int:
+        """SCAN 迭代删除匹配键（admin cache/clear L2 范围，02 §3.10）。
+
+        Args:
+            pattern: 键模式（如 "l2:ret:*"）。
+
+        Returns:
+            删除的键数量。
+        """
+        client = await self._ensure_client()
+        removed = 0
+        cursor = 0
+        while True:
+            cursor, keys = await client.scan(cursor=cursor, match=pattern, count=200)
+            if keys:
+                await client.delete(*keys)
+                removed += len(keys)
+            if cursor == 0:
+                break
+        return removed

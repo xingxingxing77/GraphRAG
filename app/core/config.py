@@ -29,6 +29,10 @@ class AppSettings(BaseSettings):
     app_name: str = Field(default="GraphRAG", description="应用名称")
     app_version: str = Field(default="0.1.0", description="应用版本")
     debug: bool = Field(default=False, description="调试模式")
+    debug_enabled: bool = Field(
+        default=True,
+        description="admin 调试端点开关（/admin/debug/* 等；生产置 False 返回 SYS_403_DEBUG_DISABLED，02 §3.11）",
+    )
 
     # CORS：显式白名单（禁用 "*" + credentials 组合，架构第 1 层注；
     # 开发期含 Vite dev 源，生产经环境变量收紧）

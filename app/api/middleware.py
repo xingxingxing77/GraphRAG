@@ -21,31 +21,6 @@ from app.api.rate_limit import RateLimiter
 _RATE_LIMIT_EXEMPT_PREFIXES = ("/health", "/ready", "/metrics")
 
 
-class AuthMiddleware(BaseHTTPMiddleware):
-    """认证中间件。
-
-    支持 JWT Token 和 API Key 两种认证方式。
-    """
-
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
-        """处理认证逻辑。
-
-        Args:
-            request: HTTP 请求。
-            call_next: 下一个中间件/路由。
-
-        Returns:
-            HTTP 响应。
-        """
-        # TODO: 检查 Authorization header（JWT）或 X-API-Key header
-        # TODO: 验证 token/key 有效性
-        # TODO: 将用户信息注入 request.state
-        response = await call_next(request)
-        return response
-
-
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """限流中间件（固定窗口，429 + Retry-After，单元 9.2）。
 
