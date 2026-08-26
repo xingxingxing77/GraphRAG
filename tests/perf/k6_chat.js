@@ -42,7 +42,7 @@ export default function () {
   const res = http.post(
     `${BASE}/threads/demo-${__VU}/runs`,
     JSON.stringify({
-      assistant_id: "rag_agent",
+      assistant_id: "agent",
       input: { original_query: query, latency_tier: TIER },
       stream_mode: "values",
     }),

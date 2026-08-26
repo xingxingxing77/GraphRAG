@@ -337,7 +337,7 @@ curl -X POST http://localhost:8000/api/v1/auth/token \
 **发起运行的输入约定**（与 AgentState 对齐，架构 §3.4）：
 
 ```js
-const stream = client.runs.stream(threadId, "rag_agent", {
+const stream = client.runs.stream(threadId, "agent", {
   input: {
     original_query: "清蒸鲈鱼怎么做好吃？",
     session_id: "s_a1b2c3",

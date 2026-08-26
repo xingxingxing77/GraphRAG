@@ -32,7 +32,7 @@
 | `DEBUG_ENABLED` | admin 调试端点总开关 | `false`（fail-closed，D7）；dev 置 `true` 开 `/admin/debug/*`（`SYS_403_DEBUG_DISABLED`） |
 | `VITE_API_BASE` | 前端→业务面 | `http://localhost:8000/api/v1` |
 | `VITE_AGENT_BASE` | 前端→langgraph | `http://localhost:8001` |
-| `VITE_AGENT_ASSISTANT` | 图 assistant_id | `rag_agent` |
+| `VITE_AGENT_ASSISTANT` | 图 assistant_id | `agent` |
 
 CORS：业务面白名单含 `http://localhost:5173`（dev）；Agent 面经 SDK 直连受 custom auth + CORS 约束（06 §1）。
 

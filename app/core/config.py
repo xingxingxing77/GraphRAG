@@ -5,8 +5,16 @@
 """
 
 # --- 标准库 ---
+import os
 from functools import lru_cache
 from typing import Optional
+
+# 本机存储（Qdrant 等）经 localhost 访问时禁用系统代理——
+# qdrant-client 底层 httpx 默认 trust_env，Windows 系统代理未对 localhost
+# 旁路时会把内网请求转发返回 502（误判存储 down）。NO_PROXY 仅影响
+# 本地地址，外部 API（tavily/ddg 等）仍走代理不受影响。
+os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1")
+os.environ.setdefault("no_proxy", "localhost,127.0.0.1")
 
 # --- 第三方库 ---
 from pydantic import Field

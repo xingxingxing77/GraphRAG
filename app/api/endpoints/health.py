@@ -94,8 +94,12 @@ async def _probe_postgres() -> bool:
 
 
 async def _probe_http(url: str) -> bool:
-    """HTTP GET 探测（2xx 视为 up）。"""
-    async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT_S) as client:
+    """HTTP GET 探测（2xx 视为 up）。
+
+    trust_env=False：探针目标均为本机服务（ollama/langgraph-server），
+    不走系统代理——否则 localhost 经代理转发会返回 502 误判 down。
+    """
+    async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT_S, trust_env=False) as client:
         resp = await client.get(url)
         return resp.status_code < 500
 

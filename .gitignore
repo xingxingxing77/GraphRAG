@@ -28,6 +28,7 @@ build/
 data/
 .langgraph_api/
 .pnpm-store/
+.workbuddy/
 
 # === 前端 (rag-web) ===
 node_modules/

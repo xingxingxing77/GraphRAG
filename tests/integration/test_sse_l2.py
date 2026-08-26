@@ -47,18 +47,23 @@ async def _token(client: httpx.AsyncClient) -> str:
 def _values_payload(events: list[tuple[str, str]]) -> dict[str, object]:
     """提取 values 终态载荷。
 
+    langgraph 在 stream_mode=["updates","values"] 下每步后都会 emit 一个
+    values 帧,因此 events 中可能含多个 values;取**最后一个**即为终态
+    (含 answer/faithfulness_score)。
+
     Args:
         events: (event, data) 帧序列。
 
     Returns:
         values 的 JSON 字典（缺失时空字典）。
     """
+    result: dict[str, object] = {}
     for event, data in events:
         if event == "values" and data:
             parsed = json.loads(data)
             if isinstance(parsed, dict):
-                return parsed
-    return {}
+                result = parsed
+    return result
 
 
 def _update_nodes(events: list[tuple[str, str]]) -> list[str]:
