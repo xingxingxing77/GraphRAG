@@ -208,8 +208,10 @@ class QdrantDBClient:
             filter_condition: 过滤条件（可选）。
 
         Returns:
-            检索结果列表，格式同 search。
+            检索结果列表，格式同 search。空向量返回空列表（P1 防 400）。
         """
+        if not sparse_vector:
+            return []
         client = await self._ensure_client()
         indices = sorted(sparse_vector.keys())
         values = [sparse_vector[i] for i in indices]

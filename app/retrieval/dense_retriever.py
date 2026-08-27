@@ -110,7 +110,8 @@ class DenseRetriever(BaseRetriever):
             聚合后的检索结果列表。
         """
         result = await self.embedding_service.embed([query])
-        if not result.dense:
+        if not result.dense or not result.dense[0]:
+            logger.warning("dense 嵌入返回空向量，降级空列表")
             return []
         query_vec = result.dense[0]
 

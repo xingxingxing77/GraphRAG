@@ -39,10 +39,13 @@ class OllamaClient:
         self._client: Optional[httpx.AsyncClient] = None
 
     async def connect(self) -> None:
-        """创建异步 HTTP 客户端（连接池复用）。"""
+        """创建异步 HTTP 客户端（连接池复用，带并发限流）。"""
         if self._client is None:
             self._client = httpx.AsyncClient(
-                base_url=self.base_url, timeout=self.timeout
+                base_url=self.base_url,
+                timeout=self.timeout,
+                limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+                trust_env=False,
             )
 
     async def close(self) -> None:
@@ -122,5 +125,8 @@ class OllamaClient:
             client = await self._ensure_client()
             resp = await client.get("/api/tags")
             return resp.status_code == 200
-        except httpx.HTTPError:
+        except Exception:  # noqa: BLE001 - 细化日志不抛错
+            import logging as _log
+
+            _log.getLogger(__name__).debug("Ollama 健康检查失败")
             return False

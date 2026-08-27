@@ -26,17 +26,18 @@ _PII_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 _MASK = "***"
 
 
-def mask_pii(text: str) -> tuple[str, int]:
+def mask_pii(text: str, patterns: list[tuple[str, re.Pattern[str]]] | None = None) -> tuple[str, int]:
     """对文本中的敏感信息脱敏为 ``***``。
 
     Args:
         text: 原始文本。
+        patterns: 可选自定义模式（默认全局 _PII_PATTERNS）。
 
     Returns:
         (脱敏后文本, 命中次数)。
     """
     hits = 0
-    for _, pat in _PII_PATTERNS:
+    for _, pat in patterns or _PII_PATTERNS:
         text, n = pat.subn(_MASK, text)
         hits += n
     return text, hits
@@ -123,14 +124,15 @@ class QualityGate:
         self.enable_pii_check = enable_pii_check
         self.hash_bits = hash_bits
         self._seen_fingerprints: list[int] = []
-        # 合并 YAML 传入的敏感模式（P0-06）
+        # 实例级 PII 模式（避免全局污染，每实例独立，P2-01）
+        self._pii_patterns: list[tuple[str, re.Pattern[str]]] = list(_PII_PATTERNS)
         if sensitive_patterns:
             for pat in sensitive_patterns:
                 try:
                     compiled = re.compile(pat)
                 except re.error:
                     continue
-                _PII_PATTERNS.append(("custom", compiled))
+                self._pii_patterns.append(("custom", compiled))
 
     def check(self, doc: CleanedDocument) -> QualityReport:
         """执行全部质量检查并返回报告。
@@ -210,7 +212,7 @@ class QualityGate:
 
     def _check_pii(self, text: str) -> tuple[bool, str]:
         hits = 0
-        for label, pat in _PII_PATTERNS:
+        for label, pat in self._pii_patterns:
             if pat.search(text):
                 hits += 1
         if hits:

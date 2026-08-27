@@ -98,8 +98,9 @@ class CleaningPipeline:
                 logger.exception("清洗规则 %s 执行失败，跳过", rule.name)
                 raise
 
-        # 敏感信息脱敏（架构 P3 内容安全过滤）
-        text, pii_hits = mask_pii(current.text)
+        # 敏感信息脱敏（架构 P3 内容安全过滤，透传 gate 实例模式 P2-01）
+        gate_patterns = getattr(self.gate, "_pii_patterns", None)
+        text, pii_hits = mask_pii(current.text, gate_patterns)
         if pii_hits:
             current = current.model_copy(update={"text": text})
 
