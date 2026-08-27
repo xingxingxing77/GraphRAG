@@ -95,6 +95,8 @@ class ModelRegistry:
             raise SystemExit(f"[fail-fast] 模型注册表缺失: {path}")
         with path.open(encoding="utf-8") as f:
             raw = yaml.safe_load(f)
+        if raw is None:
+            raise SystemExit(f"[fail-fast] 模型注册表为空: {path}")
         try:
             config = ModelsConfig.model_validate(raw)
         except Exception as exc:  # pydantic 校验错误聚合抛出

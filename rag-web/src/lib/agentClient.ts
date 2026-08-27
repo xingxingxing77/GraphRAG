@@ -14,14 +14,13 @@ function _headers(): Record<string, string> {
 
 export const client = new Client({
   apiUrl: import.meta.env.VITE_AGENT_BASE,
-  defaultHeaders: _headers() as unknown as undefined,
-  // SDK 内部 fetch 时动态注入最新 JWT（P0-07）
+  defaultHeaders: _headers(),
   fetch: ((input: RequestInfo | URL, init?: RequestInit) => {
     const headers = new Headers(init?.headers);
     if (_jwt && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${_jwt}`);
     return fetch(input, { ...init, headers });
   }) as unknown as typeof fetch,
-});
+} as unknown as ConstructorParameters<typeof Client>[0]);
 
 /** 绑定 JWT（与业务面同源 token，03 §2.1）。 */
 export function bindJwt(token: string): void {

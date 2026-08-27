@@ -90,8 +90,11 @@ class BGEReranker(RerankerService):
         ranked = sorted(zip(docs, scores), key=lambda x: -x[1])
         return ranked[:top_k]
 
+    # 单次推理最大批量，防止 OOM（P2-04）
+    _MAX_BATCH = 32
+
     async def _score(self, pairs: list[list[str]]) -> list[float]:
-        """打分调度（铁律 1：同步推理经 executor 包裹）。
+        """打分调度（铁律 1：同步推理经 executor 包裹，分批防 OOM）。
 
         Args:
             pairs: [[query, passage], ...] 对列表。
@@ -99,6 +102,18 @@ class BGEReranker(RerankerService):
         Returns:
             每对的相关性分数。
         """
+        if len(pairs) > self._MAX_BATCH:
+            # 分批累积
+            scores: list[float] = []
+            for i in range(0, len(pairs), self._MAX_BATCH):
+                chunk = pairs[i : i + self._MAX_BATCH]
+                if self._score_fn is not None:
+                    chunk_scores = [float(s) for s in await asyncio.to_thread(self._score_fn, chunk)]
+                else:
+                    loop = asyncio.get_running_loop()
+                    chunk_scores = await loop.run_in_executor(None, self._score_sync, chunk)
+                scores.extend(chunk_scores)
+            return scores
         if self._score_fn is not None:
             return [float(s) for s in await asyncio.to_thread(self._score_fn, pairs)]
         loop = asyncio.get_running_loop()

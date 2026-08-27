@@ -14,8 +14,9 @@ import logging
 
 # --- 本地模块 ---
 from app.agent.state import AgentState
-from app.api.deps import get_memory_stack
 from app.memory.semantic_cache import L1Entry
+
+import app.api.deps as deps
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ async def write_back_node(state: AgentState) -> dict[str, object]:
         return {}  # 空答案/降级作答不落任何记忆与缓存（D5/H2）
 
     try:
-        stack = await get_memory_stack()
+        stack = await deps.get_memory_stack()
     except Exception as exc:  # noqa: BLE001 - 存储不可达不影响应答交付
         logger.warning("write_back 初始化失败，跳过写侧三件事: %s", exc)
         return {}

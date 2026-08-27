@@ -221,8 +221,19 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [isAdmin] = useState(() => JSON.parse(sessionStorage.getItem("rag_user") ?? "null")?.role === "admin");
+  const [isAdmin, setIsAdmin] = useState(() => JSON.parse(sessionStorage.getItem("rag_user") ?? "null")?.role === "admin");
   const workspaceButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const onStorage = () => setIsAdmin(JSON.parse(sessionStorage.getItem("rag_user") ?? "null")?.role === "admin");
+    window.addEventListener("storage", onStorage);
+    // 同标签页登录后也需刷新（authStore 变更无 storage 事件）
+    const iv = window.setInterval(onStorage, 1000);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.clearInterval(iv);
+    };
+  }, []);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const filtered = (() => {
@@ -459,25 +470,17 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps) {
                         <span className="sidebar-copy ml-1 hidden shrink-0 text-[11px] tabular-nums text-ink-3 group-hover/row:hidden sm:block">
                           {relTime(s.updated_at)}
                         </span>
-                        <span
-                          role="button"
-                          tabIndex={0}
+                        <button
+                          type="button"
                           aria-label="删除会话"
                           onClick={(e) => {
                             e.stopPropagation();
                             handleDelete(s.session_id);
                           }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              handleDelete(s.session_id);
-                            }
-                          }}
                           className="sidebar-copy hidden shrink-0 rounded p-0.5 text-ink-3 hover:text-red-500 group-hover/row:flex"
                         >
                           <Trash2 size={13} />
-                        </span>
+                        </button>
                       </button>
                     );
                   })}

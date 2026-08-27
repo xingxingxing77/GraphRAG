@@ -142,9 +142,13 @@ async def readiness_check(
         "ollama": lambda: _probe_http(f"{settings.ollama_base_url}/api/tags"),
     }
 
-    # 并行探测（独立_timeout_铁律：互不阻塞）
+    # 并行探测（独立_timeout_铁律：互不阻塞，单探针超时不拖累整体 P2-04）
     async def _run(name: str, probe: Callable[[], Awaitable[bool]]) -> tuple[str, bool, int]:
-        ok, latency = await _timed(probe)
+        try:
+            ok, latency = await asyncio.wait_for(_timed(probe), timeout=_PROBE_TIMEOUT_S + 1.0)
+        except asyncio.TimeoutError:
+            logger.warning("健康探针超时 %s", name)
+            return name, False, int((_PROBE_TIMEOUT_S + 1.0) * 1000)
         return name, ok, latency
 
     results = await asyncio.gather(*(_run(n, p) for n, p in probes.items()))

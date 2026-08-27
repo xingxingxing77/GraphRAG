@@ -28,10 +28,10 @@ export const useConfigStore = create<ConfigState>()((set) => ({
     try {
       const cfg = await getPublicConfig();
       set({
-        models: cfg.models,
-        latencyTiers: cfg.latency_tiers,
-        compressionStrategies: cfg.compression_strategies,
-        profile: cfg.profile,
+        models: cfg.models ?? [],
+        latencyTiers: cfg.latency_tiers ?? ["fast", "standard", "deep"],
+        compressionStrategies: cfg.compression_strategies ?? ["llm_extract", "extractive", "none"],
+        profile: cfg.profile ?? "cloud-primary",
         loaded: true,
       });
     } catch {

@@ -15,17 +15,15 @@ from typing import Any
 
 # --- 本地模块 ---
 from app.agent.state import AgentState
-from app.api.deps import get_memory_stack
+
+import app.api.deps as deps
 
 logger = logging.getLogger(__name__)
-
-# 顶层已导入，避免首个 async 节点内惰性导入触发 zoneinfo/sysconfig 的 os.getcwd 阻塞
 
 
 async def _load_context(state: AgentState) -> str:
     """调用调度器组装上下文文本（异常返回空串）。"""
-
-    stack = await get_memory_stack()
+    stack = await deps.get_memory_stack()
     ctx = await stack.scheduler.build_context(
         user_id=str(state.get("user_id", "")),
         session_id=str(state.get("session_id", "")),

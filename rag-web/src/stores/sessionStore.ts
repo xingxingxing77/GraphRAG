@@ -71,6 +71,7 @@ interface SessionState {
   sessions: SessionSummary[];
   nextCursor: string | null;
   loading: boolean;
+  initialized: boolean;
   /** 当前在侧栏选中的会话（null = 空态/新会话）；值即 thread_id */
   activeSessionId: string | null;
   loadMore(reset?: boolean): Promise<void>;
@@ -82,11 +83,12 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
   sessions: [],
   nextCursor: null,
   loading: false,
+  initialized: false,
   activeSessionId: null,
 
   async loadMore(reset = false) {
-    const { nextCursor, loading } = get();
-    if (loading || (!reset && nextCursor === null && get().sessions.length > 0)) return;
+    const { nextCursor, loading, initialized } = get();
+    if (loading || (!reset && initialized && nextCursor === null)) return;
     set({ loading: true });
     try {
       const { listSessions } = await import("@/api/sessions");
@@ -94,7 +96,8 @@ export const useSessionStore = create<SessionState>()((set, get) => ({
       const items = page.items ?? [];
       set((s) => ({
         sessions: reset ? items : [...s.sessions, ...items],
-        nextCursor: page.next_cursor,
+        nextCursor: page.next_cursor ?? null,
+        initialized: true,
       }));
     } finally {
       set({ loading: false });

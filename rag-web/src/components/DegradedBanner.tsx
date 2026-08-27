@@ -23,14 +23,20 @@ const DEGRADED_TEXT: Record<string, string> = {
  */
 export function DegradedBanner() {
   const reasons = useChatStore((s) => s.degradedReasons);
+  const clear = useChatStore((s) => s.clearDegraded);
   if (reasons.length === 0) return null;
   return (
-    <div className="flex flex-col gap-0.5 border-b border-orange-200 bg-orange-50 px-4 py-2 dark:border-orange-900 dark:bg-orange-950/40">
-      {reasons.map((r) => (
-        <p key={r} className="text-xs text-orange-700 dark:text-orange-300">
-          {DEGRADED_TEXT[r] ?? r}
-        </p>
-      ))}
+    <div className="flex items-start justify-between gap-2 border-b border-orange-200 bg-orange-50 px-4 py-2 dark:border-orange-900 dark:bg-orange-950/40">
+      <div className="flex flex-col gap-0.5">
+        {reasons.map((r) => (
+          <p key={r} className="text-xs text-orange-700 dark:text-orange-300">
+            {DEGRADED_TEXT[r] ?? r}
+          </p>
+        ))}
+      </div>
+      <button type="button" onClick={clear} className="shrink-0 rounded px-2 py-0.5 text-xs text-orange-700 hover:bg-orange-100 dark:text-orange-300">
+        关闭
+      </button>
     </div>
   );
 }

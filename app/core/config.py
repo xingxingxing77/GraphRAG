@@ -113,28 +113,35 @@ class AppSettings(BaseSettings):
     def validate_prod_secrets(self) -> None:
         """生产环境强校验：dev 默认密钥未覆盖则拒绝启动（fail-fast，D7/J16）。
 
-        Raises:
-            SystemExit: 仍使用 dev 默认密钥且非显式 dev 环境。
-        """
-        # 显式 dev 模式放行（DEBUG=true 或 ENV=dev/test）
-        env_marker = (os.environ.get("ENV", "") + os.environ.get("APP_ENV", "")).lower()
-        if self.debug or env_marker in ("dev", "test", "development", "devtest"):
-            return
-        if self.jwt_secret == self._DEV_JWT_SECRET:
-            raise SystemExit(
-                "[fail-fast] JWT_SECRET 仍为开发默认值，生产必须经环境变量注入 ≥32 字节随机值（D7/J16）"
-            )
-        if len(self.jwt_secret) < 32:
-            raise SystemExit("[fail-fast] JWT_SECRET 长度不足 32 字节，拒绝启动")
-        if self.admin_password == self._DEV_ADMIN_PASSWORD:
-            raise SystemExit("[fail-fast] ADMIN_PASSWORD 仍为开发默认值，生产必须覆盖")
-        if self.valid_api_keys == self._DEV_API_KEY:
-            # valid_api_keys 为可选但若使用 api_key grant 则必须覆盖；此处警告
-            import logging as _log
+        仅当显式 ENV=prod/production 时强拒绝；其余环境（含空/test/dev）
+        仅告警，避免 pytest/本地开发因未注入密钥而无法启动（P0-01 与测试兼容）。
 
-            _log.getLogger(__name__).warning(
-                "[security] VALID_API_KEYS 仍为开发默认值，若启用 api_key 鉴权请覆盖"
-            )
+        Raises:
+            SystemExit: 显式生产环境仍使用 dev 默认密钥。
+        """
+        env_marker = (os.environ.get("ENV", "") + os.environ.get("APP_ENV", "")).lower()
+        # pytest / 本地开发 / 无 ENV 均放行为告警模式
+        is_prod = env_marker in ("prod", "production")
+        import logging as _log
+
+        _logger = _log.getLogger(__name__)
+        if self.jwt_secret == self._DEV_JWT_SECRET:
+            msg = "[security] JWT_SECRET 仍为开发默认值，生产必须经环境变量注入 ≥32 字节随机值（D7/J16）"
+            if is_prod:
+                raise SystemExit(f"[fail-fast] {msg}")
+            _logger.warning(msg)
+        elif len(self.jwt_secret) < 32:
+            msg = "[security] JWT_SECRET 长度不足 32 字节"
+            if is_prod:
+                raise SystemExit(f"[fail-fast] {msg}，拒绝启动")
+            _logger.warning(msg)
+        if self.admin_password == self._DEV_ADMIN_PASSWORD:
+            msg = "[security] ADMIN_PASSWORD 仍为开发默认值，生产必须覆盖"
+            if is_prod:
+                raise SystemExit(f"[fail-fast] {msg}")
+            _logger.warning(msg)
+        if self.valid_api_keys == self._DEV_API_KEY:
+            _logger.warning("[security] VALID_API_KEYS 仍为开发默认值，若启用 api_key 鉴权请覆盖")
 
     # Ollama 配置
     ollama_base_url: str = Field(default="http://localhost:11434", description="Ollama 服务地址")

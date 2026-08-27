@@ -35,6 +35,7 @@ function Check() {
 
 export function ThoughtPanel({ steps, streaming }: { steps: ThoughtStep[]; streaming: boolean }) {
   const [manual, setManual] = useState<boolean | null>(null);
+  // streaming 结束自动收起（用户未手动操作时），避免完成后常驻展开（P2-02）
   const expanded = manual ?? streaming;
 
   return (
@@ -77,7 +78,7 @@ export function ThoughtPanel({ steps, streaming }: { steps: ThoughtStep[]; strea
           <ol className="mt-1 ml-[5px] space-y-1 border-l border-line pl-4">
             {steps.map((t, i) => (
               <li
-                key={t.node + "_" + i}
+                key={t.node + "_" + i + "_" + t.summary.slice(0, 8)}
                 className="flex min-h-7 items-center gap-2 rounded-[6px] px-1.5 py-0.5"
               >
                 {i < steps.length - 1 || !streaming ? (

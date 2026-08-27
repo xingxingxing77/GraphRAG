@@ -28,6 +28,7 @@ export default function ChatPage() {
 
   const sessions = useSessionStore((s) => s.sessions);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const initialized = useSessionStore((s) => s.initialized);
   const setActive = useSessionStore((s) => s.setActive);
   const loadMore = useSessionStore((s) => s.loadMore);
   const remove = useSessionStore((s) => s.remove);
@@ -46,10 +47,14 @@ export default function ChatPage() {
     return sessions.filter((s) => (s.title ?? "").toLowerCase().includes(q));
   }, [sessions, search]);
 
-  /** 删除会话：API 204（失败静默，后端未就绪时仅本地移除）。 */
-  function handleDelete(sessionId: string) {
-    void deleteSession(sessionId).catch(() => undefined);
-    remove(sessionId);
+  /** 删除会话：先等 API，失败 toast 提示不移除本地（P2-02）。 */
+  async function handleDelete(sessionId: string) {
+    try {
+      await deleteSession(sessionId);
+      remove(sessionId);
+    } catch {
+      // 网络/鉴权失败不移除，交由全局错误提示
+    }
   }
 
   /** 选择会话：装载历史消息（10.8 批次 B：会话历史装载，02 §3.3）。 */
@@ -76,7 +81,11 @@ export default function ChatPage() {
       />
       <main className="flex min-w-0 flex-1 flex-col">
         <DegradedBanner />
-        {messages.length === 0 ? (
+        {!initialized && messages.length === 0 ? (
+          <div className="flex h-full items-center justify-center">
+            <p className="text-sm text-ink-3">加载中…</p>
+          </div>
+        ) : messages.length === 0 ? (
           <EmptyStateHero suggestions={[]} onSubmit={(q) => void send(q)} />
         ) : (
           <>

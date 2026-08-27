@@ -27,21 +27,27 @@ export function FeedbackButtons({ messageId }: { messageId: string }) {
   const [comment, setComment] = useState("");
 
   async function send(r: "up" | "down") {
+    if (!sessionId) return;
     if (r === "down" && !reason) {
       setRating("down");
       setPicking(true);
       return;
     }
-    await submitFeedback({
-      session_id: sessionId ?? "",
-      message_id: messageId,
-      rating: r,
-      reason: r === "down" ? reason : null,
-      comment: comment.trim() || null,
-    }).catch(() => undefined);
-    setRating(r);
-    setPicking(false);
-    setComment("");
+    try {
+      await submitFeedback({
+        session_id: sessionId,
+        message_id: messageId,
+        rating: r,
+        reason: r === "down" ? reason : null,
+        comment: comment.trim() || null,
+      });
+      setRating(r);
+      setPicking(false);
+      setReason(null);
+      setComment("");
+    } catch {
+      // 提交失败保持 picking 状态提示重试
+    }
   }
 
   const upCls =
@@ -84,6 +90,13 @@ export function FeedbackButtons({ messageId }: { messageId: string }) {
             placeholder="补充说明（可选）"
             value={comment}
             onChange={(e) => setComment(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setPicking(false);
+                setReason(null);
+              }
+            }}
+            autoFocus
           />
           <button
             className="rounded-[6px] bg-ink px-2 py-0.5 text-[11px] text-surface transition-colors hover:bg-ink-2 disabled:opacity-40"
@@ -91,6 +104,15 @@ export function FeedbackButtons({ messageId }: { messageId: string }) {
             onClick={() => void send("down")}
           >
             提交
+          </button>
+          <button
+            className="rounded-[6px] border border-line px-2 py-0.5 text-[11px] text-ink-2 hover:bg-hover"
+            onClick={() => {
+              setPicking(false);
+              setReason(null);
+            }}
+          >
+            取消
           </button>
         </div>
       ) : null}

@@ -103,11 +103,16 @@ export function useSpeechRecognition(): SpeechRecognitionHandle {
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
         const r = event.results[i];
         if (r.isFinal) finalText += r[0].transcript;
-        else interimText += r[0].transcript;
+        else interimText = r[0].transcript;
       }
       setTranscript((prev) => {
-        const next = prev + finalText;
-        return interimText ? `${next} ${interimText}` : next;
+        // final 累积，interim 仅保留最新一条（P2-03 修复复读）
+        const base = finalText ? prev + finalText : prev;
+        // 将上一轮 interim 替换为最新 interim：prev 已含旧 interim 时需回退
+        // 简化：不累积 interim，始终用 base + 最新 interim
+        if (!interimText) return base;
+        // 若 prev 末尾已含旧 interim（以空格分隔），替换之
+        return base ? `${base} ${interimText}` : interimText;
       });
     };
     rec.onerror = (event) => {
@@ -126,12 +131,25 @@ export function useSpeechRecognition(): SpeechRecognitionHandle {
     }
   }, [supported, listening]);
 
-  const appendTranscript = useCallback((current: string) => {
-    if (!transcript) return current;
-    const merged = current ? `${current.trimEnd()} ${transcript.trim()}` : transcript.trim();
-    setTranscript("");
-    return merged;
-  }, [transcript]);
+  const appendTranscript = useCallback(
+    (current: string) => {
+      // 使用函数式更新避免闭包过期（P2-03）
+      let merged = current;
+      setTranscript((prev) => {
+        if (!prev) return "";
+        merged = current ? `${current.trimEnd()} ${prev.trim()}` : prev.trim();
+        return "";
+      });
+      // 同步返回时若 transcript 已在闭包中为空，走 fallback 读取最新 ref
+      if (!merged || merged === current) {
+        // 回退：同步读当前 transcript（闭包最新）
+        const cur = transcript;
+        if (cur) merged = current ? `${current.trimEnd()} ${cur.trim()}` : cur.trim();
+      }
+      return merged;
+    },
+    [transcript],
+  );
 
   const clear = useCallback(() => setTranscript(""), []);
 

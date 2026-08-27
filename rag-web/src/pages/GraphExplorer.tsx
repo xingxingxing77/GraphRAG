@@ -28,6 +28,7 @@ interface NvlRel {
 const ZONE_COLOR: Record<string, string> = {
   core: "#5b5bf0",
   open: "#8b919c",
+  pending: "#a0a0a0",
 };
 
 /**
@@ -172,6 +173,7 @@ export default function GraphExplorerPage() {
         <div className="relative min-w-0 flex-1">
           {nvl && nvl.nodes.length > 0 ? (
             <InteractiveNvlWrapper
+              key={nvl.nodes.map((n) => n.id).join(",")}
               nodes={nvl.nodes}
               rels={nvl.rels}
               layout="forceDirected"

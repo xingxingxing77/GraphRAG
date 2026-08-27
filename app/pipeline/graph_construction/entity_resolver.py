@@ -137,6 +137,8 @@ def load_alias_table(path: Path = _DEFAULT_ALIASES_YAML) -> AliasTable:
         raise SystemExit(f"[fail-fast] 实体别名表缺失: {path}")
     with path.open(encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
+    if raw is None or raw == {}:
+        raise SystemExit(f"[fail-fast] 实体别名表为空: {path}")
     groups = raw.get("groups")
     if not isinstance(groups, list):
         raise SystemExit("[fail-fast] entity_aliases.yaml 缺少 groups 列表")

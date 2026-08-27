@@ -27,11 +27,12 @@ export interface ComposerProps {
  * @param props - 见 ComposerProps。
  * @returns PromptBar 实例。
  */
-export function Composer({ onSubmit }: ComposerProps) {
+export function Composer({ onSubmit, compact }: ComposerProps) {
   return (
     <PromptBar
       demo={false}
       variant="Pill"
+      tall={!compact}
       placeholder="输入你的问题…"
       onSend={onSubmit}
     />
