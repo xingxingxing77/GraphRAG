@@ -382,8 +382,6 @@ export default function ParticleOrb({ anchorRef, className }: ParticleOrbProps) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-}, []);
-
   return (
     <div
       aria-hidden
