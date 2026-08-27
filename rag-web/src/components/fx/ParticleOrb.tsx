@@ -120,11 +120,13 @@ export default function ParticleOrb({ anchorRef, className }: ParticleOrbProps) 
       return y;
     }
 
-    /** 球心锚定：锚点中心 + 球高 38% 下移 */
+    /** 球心锚定：球心 = 锚点中心 + 球高 38% 下移。
+     * 球心在 wrap 内居中，所以 wrap.style.top = 锚点中心 + 球高 38% - wrap.height/2
+     * （即 offset = wrap.height × (0.38 - 0.5) = -wrap.height × 0.12）。 */
     function positionOrb(): void {
       if (!anchor || !stage) return;
       const centerY = offsetTopWithin(anchor, stage) + anchor.offsetHeight / 2;
-      const offset = wrap.offsetHeight * 0.38;
+      const offset = wrap.offsetHeight * (0.38 - 0.5);
       wrap.style.top = `${centerY + offset}px`;
     }
 
@@ -380,10 +382,12 @@ export default function ParticleOrb({ anchorRef, className }: ParticleOrbProps) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+}, []);
+
   return (
     <div
       aria-hidden
-      className={`pointer-events-none absolute left-1/2 top-1/2 z-0 aspect-square w-[clamp(700px,70vw,1120px)] select-none ${className ?? ""}`}
+      className={`pointer-events-none absolute left-1/2 top-1/2 z-0 w-[clamp(700px,70vw,1120px)] h-[clamp(700px,70vw,1120px)] select-none ${className ?? ""}`}
       style={{ transform: "translate(-50%, -50%) scale(1.08)", mixBlendMode: "screen" }}
     >
       <canvas
