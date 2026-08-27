@@ -14,7 +14,7 @@ from enum import Enum
 from typing import Any, Generic, Literal, TypeVar
 
 # --- 第三方库 ---
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ============================================================
@@ -611,6 +611,13 @@ class ChatRequest(BaseModel):
     latency_tier: Literal["auto", "fast", "standard", "deep"] = "auto"
     model: str | None = None
 
+    @field_validator("query", mode="after")
+    @classmethod
+    def _check_query_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("query 不能为空（去空白后为空）")
+        return v
+
 
 class ChatResponse(BaseModel):
     """聊天响应（架构 §3.6：含 degraded 与 latency_tier）。
@@ -647,6 +654,13 @@ class ChatRunInput(BaseModel):
     session_id: str | None = None
     user_id: str | None = None
 
+    @field_validator("original_query", mode="after")
+    @classmethod
+    def _check_original_query_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("original_query 不能为空（去空白后为空）")
+        return v
+
 
 class PrecheckRequest(BaseModel):
     """POST /chat/precheck 请求（02 §3.8，J22 语义缓存短路）。
@@ -658,6 +672,13 @@ class PrecheckRequest(BaseModel):
 
     query: str = Field(..., min_length=1, max_length=2000)
     session_id: str | None = None
+
+    @field_validator("query", mode="after")
+    @classmethod
+    def _check_query_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("query 不能为空（去空白后为空）")
+        return v
 
 
 class SuggestedRun(BaseModel):

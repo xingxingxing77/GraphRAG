@@ -236,7 +236,10 @@ class RedisClient:
         try:
             client = await self._ensure_client()
             return bool(await client.ping())
-        except Exception:  # noqa: BLE001 - 健康检查不抛错
+        except Exception as exc:  # noqa: BLE001 - 健康检查不抛错，细分日志
+            import logging as _log
+
+            _log.getLogger(__name__).debug("Redis 健康检查失败: %s: %s", type(exc).__name__, exc)
             return False
 
     async def scan_and_delete(self, pattern: str) -> int:

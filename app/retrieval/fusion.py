@@ -45,11 +45,21 @@ def _load_config() -> tuple[str, dict[str, float]]:
             cfg = yaml.safe_load(f) or {}
         retrieval_cfg = cfg.get("retrieval") or {}
         strategy = str(retrieval_cfg.get("fusion", "rrf"))
-        weights = dict(retrieval_cfg.get("weights") or cfg.get("weights") or _DEFAULT_WEIGHTS)
-        return strategy, {str(k): float(v) for k, v in weights.items()}
+        raw_weights = retrieval_cfg.get("weights") or cfg.get("weights") or _DEFAULT_WEIGHTS
+        # 合并默认值：YAML缺失的路自动补齐（P0-05），避免 weighted 静默禁用
+        merged = dict(_DEFAULT_WEIGHTS)
+        for k, v in dict(raw_weights).items():
+            merged[str(k)] = float(v)
+        # 归一化：和为1，消除配置增减导致的分数漂移
+        total = sum(merged.values())
+        if total > 1e-12:
+            merged = {k: v / total for k, v in merged.items()}
+        return strategy, merged
     except Exception as exc:  # noqa: BLE001 - 配置缺失用默认
         logger.warning("融合配置读取失败，使用默认: %s", exc)
-        return "rrf", dict(_DEFAULT_WEIGHTS)
+        total = sum(_DEFAULT_WEIGHTS.values())
+        norm = {k: v / total for k, v in _DEFAULT_WEIGHTS.items()} if total > 1e-12 else dict(_DEFAULT_WEIGHTS)
+        return "rrf", norm
 
 
 def _doc_key(result: RetrievalResult) -> str:
@@ -63,7 +73,8 @@ def _doc_key(result: RetrievalResult) -> str:
     """
     if result.chunk_id:
         return f"chunk:{result.chunk_id}"
-    return "content:" + hashlib.sha256(result.content.encode("utf-8")).hexdigest()[:16]
+    # P1 M-18: 延长至24位（96bit）降低万级碰撞概率
+    return "content:" + hashlib.sha256(result.content.encode("utf-8")).hexdigest()[:24]
 
 
 class FusionEngine:
@@ -90,7 +101,14 @@ class FusionEngine:
         """
         cfg_strategy, cfg_weights = _load_config()
         self.strategy = strategy or cfg_strategy
-        self.weights = weights or cfg_weights
+        # weights 显式传入时同样归一化（P0-05）
+        raw = weights if weights is not None else cfg_weights
+        if weights is not None:
+            merged = dict(cfg_weights)
+            merged.update({str(k): float(v) for k, v in weights.items()})
+            total = sum(merged.values())
+            raw = {k: v / total for k, v in merged.items()} if total > 1e-12 else merged
+        self.weights = raw
         self.rrf_k = rrf_k
 
     def fuse(

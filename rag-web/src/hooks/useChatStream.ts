@@ -29,23 +29,28 @@ const TIER_TIMEOUT_MS: Record<"fast" | "standard" | "deep", number> = {
   deep: 55_000,
 };
 
-/** 错误码 → 文案（06 §9 子集；完整映射随 DegradedBanner/文案表扩展）。 */
+/** 错误码 → 文案（06 §9 / 02 §6；校验类统一为“输入有误”，服务端故障为“开小差”）。 */
 export function mapErrorText(code: string): string {
   switch (code) {
     case "CHAT_400_EMPTY_QUERY":
     case "CHAT_400_INVALID_TIER":
+    case "SYS_400_VALIDATION":
+    case "SYS_404_NOT_FOUND":
+    case "DEBUG_400_INVALID_SOURCE":
       return "输入有误，请检查后重试";
     case "CHAT_429_RATE_LIMITED":
       return "请求太频繁，请稍后再试";
     case "CHAT_504_TIER_TIMEOUT":
       return "回答超时，可重试或切换深度模式";
     case "CHAT_404_THREAD_NOT_FOUND":
+    case "SESSION_404_NOT_FOUND":
       return "会话已失效，请新建会话";
     case "AUTH_401_TOKEN_EXPIRED":
     case "AUTH_401_TOKEN_INVALID":
       return "登录已过期，请重新登录";
     case "SYS_500_INTERNAL":
     case "SYS_503_DEPENDENCY_DOWN":
+    case "GRAPH_503_STORE_UNAVAILABLE":
       return "服务开小差了，请稍后重试";
     default:
       return "请求失败，请稍后重试";
@@ -67,7 +72,25 @@ export function useChatStream() {
     const user = useAuthStore.getState().user;
     if (chat.streaming || !user) return;
 
-    chat.appendUserMessage(query);
+    // 前置输入校验：空/空白/超长直接本地拦截，避免走到服务端 400/500 再误判为“开小差”
+    const trimmed = query.trim();
+    if (!trimmed) {
+      chat.appendAssistant({ content: `⚠ ${mapErrorText("CHAT_400_EMPTY_QUERY")}`, degraded: false });
+      return;
+    }
+    if (trimmed.length > 2000) {
+      chat.appendAssistant({ content: `⚠ ${mapErrorText("SYS_400_VALIDATION")}`, degraded: false });
+      return;
+    }
+    // 统一用 trim 后的正文进入链路（避免 "   " 穿透到后端）
+    const normalizedQuery = trimmed;
+
+    chat.appendUserMessage(normalizedQuery);
+    // P0-07/P1: 每轮重置 thought/降级态，避免跨轮堆积（S-04, Z-03）
+    chat.clearThoughts();
+    chat.setRegenerating(false);
+    chat.setFaithfulnessScore(null as unknown as number);
+    chat.clearDegraded();
     chat.setStreaming(true);
 
     // 会话标识 = thread_id（GAP-A1：thread_id 即 session 锚点，02 §3.2）；
@@ -78,7 +101,7 @@ export function useChatStream() {
     //    miss 时消费 suggested_run.latency_tier（意图启发式建议档位，06 §8.2）
     let suggestedTier: "fast" | "standard" | "deep" | null = null;
     try {
-      const pre = await precheck({ query, session_id: sessionId });
+      const pre = await precheck({ query: normalizedQuery, session_id: sessionId });
       if (pre.hit) {
         chat.appendAssistant({
           content: pre.answer ?? "",
@@ -91,8 +114,15 @@ export function useChatStream() {
       }
       const st = pre.suggested_run?.latency_tier;
       if (st) suggestedTier = st;
-    } catch {
-      /* precheck 异常按 miss 处理（03 §8） */
+    } catch (e) {
+      // 400 校验类错误直接透出“输入有误”，其他按 miss 处理（03 §8）
+      const preCode = (e as { response?: { data?: { code?: string } } })?.response?.data?.code ?? "";
+      if (preCode === "CHAT_400_EMPTY_QUERY" || preCode === "SYS_400_VALIDATION") {
+        chat.appendAssistant({ content: `⚠ ${mapErrorText(preCode)}`, degraded: false });
+        chat.setStreaming(false);
+        return;
+      }
+      /* 其他 precheck 异常按 miss 处理 */
     }
 
     // ② 发起流式 run（线程惰性创建，03 §8）
@@ -110,45 +140,74 @@ export function useChatStream() {
         suggestedTier ?? (chat.activeTier === "auto" ? "standard" : chat.activeTier);
       const stream = streamRun(
         threadId,
-        { original_query: query, session_id: threadId, user_id: user.id },
+        { original_query: normalizedQuery, session_id: threadId, user_id: user.id },
         { latency_tier: tier, model: model ?? chat.model ?? null },
       );
 
-      // 读超时兜底（03 §7）：超时中断消费并按 CHAT_504_TIER_TIMEOUT 呈现
+      // 读超时兜底（03 §7）：超时中断消费并按 CHAT_504_TIER_TIMEOUT 呈现（P0-07）
       let timedOut = false;
-      const timer = setTimeout(() => {
+      let timer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
         timedOut = true;
       }, TIER_TIMEOUT_MS[tier]);
 
-      for await (const ev of stream) {
-        if (timedOut) break;
-        // SDK 1.x 事件为判别联合；此处按字面量归一消费（updates/values/error，03 §3.3）
-        const event = String((ev as { event?: unknown }).event ?? "");
-        const data = ((ev as { data?: unknown }).data ?? {}) as Record<string, unknown>;
-        if (event === "updates") {
-          // updates 载荷形如 { "<node>": delta }（03 §3.3，thought 唯一来源）
-          const [node, delta] = Object.entries(data)[0] ?? [];
-          if (node && isAgentNode(node)) {
-            const d = (delta ?? {}) as Record<string, unknown>;
-            chat.pushThoughtStep(node, summarizeNodeUpdate(node, d));
-            // 重生成提示（5.6）与忠实度徽章（7.1）状态驱动
-            if (node === "generator" && d.regenerated === true) chat.setRegenerating(true);
-            if (node === "self_correction" && typeof d.faithfulness_score === "number") {
-              chat.setFaithfulnessScore(d.faithfulness_score as number);
-            }
-          }
-        } else if (event === "values") {
-          const fin = extractFinalState(data);
-          chat.setFinalAnswer(fin.answer, fin.citations, fin.degradedReasons);
-        } else if (event === "error") {
-          const err = (data.error ?? {}) as { code?: string };
-          chat.appendAssistant({
-            content: `⚠ ${mapErrorText(err.code ?? "SYS_500_INTERNAL")}`,
-            degraded: false,
-          });
+      const clearTimer = () => {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
         }
+      };
+
+      try {
+        for await (const ev of stream) {
+          if (timedOut) break;
+          // SDK 1.x 事件为判别联合；兼容 ev.event 与 ev.data.event（P0-07 S-05）
+          const raw = ev as unknown as Record<string, unknown>;
+          const event =
+            String((raw.event as string | undefined) ?? "") ||
+            String(((raw.data as Record<string, unknown> | undefined)?.event as string | undefined) ?? "") ||
+            // fallback: 若 ev 本身形如 {updates: {...}} 则视为 updates
+            (raw.updates || raw.values ? String(Object.keys(raw)[0] ?? "") : "");
+          // data 兼容两层嵌套
+          const maybeData = (raw.data as Record<string, unknown> | undefined) ?? raw;
+          const data = (maybeData.data as Record<string, unknown> | undefined) ?? maybeData;
+
+          if (event === "updates" || raw.updates) {
+            // updates 载荷形如 { "<node>": delta }，可能多 key 批量（P0-07 S-03）
+            const updatesPayload =
+              (data.updates as Record<string, unknown> | undefined) ??
+              (raw.updates as Record<string, unknown> | undefined) ??
+              data;
+            for (const [node, delta] of Object.entries(updatesPayload)) {
+              if (!node || node === "event" || node === "data") continue;
+              if (!isAgentNode(node)) continue;
+              const d = (delta ?? {}) as Record<string, unknown>;
+              chat.pushThoughtStep(node, summarizeNodeUpdate(node, d));
+              if (node === "generator" && d.regenerated === true) chat.setRegenerating(true);
+              if (node === "self_correction" && typeof d.faithfulness_score === "number") {
+                chat.setFaithfulnessScore(d.faithfulness_score as number);
+              }
+            }
+          } else if (event === "values" || raw.values) {
+            const valuesPayload =
+              (data.values as Record<string, unknown> | undefined) ??
+              (raw.values as Record<string, unknown> | undefined) ??
+              data;
+            const fin = extractFinalState(valuesPayload as Record<string, unknown>);
+            chat.setFinalAnswer(fin.answer, fin.citations, fin.degradedReasons);
+          } else if (event === "error") {
+            const err = (data.error ?? {}) as { code?: string };
+            chat.appendAssistant({
+              content: `⚠ ${mapErrorText(err.code ?? "SYS_500_INTERNAL")}`,
+              degraded: false,
+            });
+          } else if (event === "messages") {
+            // fast 档 messages-tuple 逐 token（P0-07 S-02 预留，不阻塞主链路）
+            // 暂不直接推流，由 values 终态统一落地，避免 M1 提前流出
+          }
+        }
+      } finally {
+        clearTimer();
       }
-      clearTimeout(timer);
       if (timedOut) {
         chat.appendAssistant({
           content: `⚠ ${mapErrorText("CHAT_504_TIER_TIMEOUT")}`,
@@ -156,9 +215,23 @@ export function useChatStream() {
         });
       }
     } catch (e) {
-      const code =
-        (e as { response?: { data?: { code?: string } } })?.response?.data?.code ??
-        "SYS_500_INTERNAL";
+      const ax = e as {
+        response?: { data?: { code?: string; message?: string } ; status?: number };
+        code?: string;
+        message?: string;
+      };
+      const rawCode = ax?.response?.data?.code ?? ax?.code ?? "";
+      // 兜底：若 code 缺失但 status 为 400/404，按校验类映射，避免“开小差”误导
+      let code = rawCode || "SYS_500_INTERNAL";
+      if (!rawCode) {
+        const status = ax?.response?.status;
+        if (status === 400) code = "SYS_400_VALIDATION";
+        else if (status === 404) code = "SYS_404_NOT_FOUND";
+      }
+      // 额外透出原始 message 到控制台，便于排查输入问题时不丢失上下文
+      if (typeof console !== "undefined" && console.debug) {
+        console.debug("[useChatStream] run failed", { code, raw: ax?.response?.data ?? ax });
+      }
       chat.appendAssistant({ content: `⚠ ${mapErrorText(code)}`, degraded: false });
     } finally {
       chat.setStreaming(false);

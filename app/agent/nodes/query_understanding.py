@@ -15,6 +15,7 @@ from typing import Any
 
 # --- 本地模块 ---
 from app.agent.state import AgentState
+from app.core.models import IntentType
 from app.query.router import resolve_latency_tier, understand_query
 
 logger = logging.getLogger(__name__)
@@ -29,8 +30,18 @@ async def query_understanding_node(state: AgentState) -> dict[str, Any]:
     Returns:
         状态增量：query（改写后）/ intent / latency_tier（具体档位）。
     """
-    query = state.get("query") or state.get("original_query", "")
+    raw_query = state.get("query") or state.get("original_query", "")
+    query = raw_query.strip()
     requested_tier = str(state.get("latency_tier") or "auto")
+
+    # 空输入守卫：空白查询直接按 chitchat/fast 短路，避免进入 LLM 导致无意义错误冒泡为 500
+    if not query:
+        logger.info("query_understanding 空输入守卫命中（fast/chitchat 短路）")
+        return {
+            "query": "",
+            "intent": IntentType.CHITCHAT,
+            "latency_tier": resolve_latency_tier(IntentType.CHITCHAT, requested_tier),
+        }
 
     # query 已含 load_memory 注入上下文（注入在改写前，04 §4/J17）
     result = await understand_query(query)

@@ -24,9 +24,9 @@ models:
       temperature: 0.2
 
   local-qwen7b:
-    base_url: http://host.docker.internal:11434/v1   # Ollama 宿主机原生安装, 非容器化 (v2.2 基准)
+    base_url: http://localhost:11434/v1   # Ollama 宿主机原生安装, 非容器化 (v2.2 基准, Windows 本机经 localhost, 容器内 host.docker.internal 经代理 502)
     api_key_ref: LOCAL_KEY                           # 本地端点占位, 可为空串
-    model: qcwind/qwen2.5-7B-instruct-Q4_K_M       # 须与本机 `ollama list` 名称精确一致
+    model: qcwind/qwen2.5-7B-instruct-Q4_K_M       # 须与本机 `ollama list` 名称精确一致（:latest 后缀可选）
 
 # --- 角色化路由 (J2): 请求参数 model 可临时覆盖角色默认 ---
 roles:

@@ -50,6 +50,8 @@ interface ChatState {
   setFinalAnswer(answer: string, citations: Citation[], reasons: DegradedReason[]): void;
   consumeTypewriter(): void;
   pushDegraded(reasons: string[]): void;
+  clearDegraded(): void;
+  clearThoughts(): void;
   setActiveTier(tier: "auto" | "fast" | "standard" | "deep"): void;
   setModel(model: string | null): void;
   setRegenerating(v: boolean): void;
@@ -124,6 +126,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     set((s) => ({ degradedReasons: Array.from(new Set([...s.degradedReasons, ...known])) }));
   },
 
+  clearDegraded() {
+    set({ degradedReasons: [] });
+  },
+
+  clearThoughts() {
+    set({ thoughtSteps: [] });
+  },
+
   setActiveTier(tier) {
     set({ activeTier: tier });
   },
@@ -141,7 +151,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   },
 
   async loadHistory(sessionId) {
-    set({ streaming: false, thoughtSteps: [], typewriterTarget: null, regenerating: false, faithfulnessScore: null });
+    set({
+      streaming: false,
+      thoughtSteps: [],
+      typewriterTarget: null,
+      regenerating: false,
+      faithfulnessScore: null,
+      degradedReasons: [],
+    });
     const { getSessionMessages } = await import("@/api/sessions");
     const page = await getSessionMessages(sessionId);
     const items = page.items ?? [];
@@ -166,6 +183,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       thoughtSteps: [],
       typewriterTarget: null,
       degradedReasons: [],
+      model: null,
       regenerating: false,
       faithfulnessScore: null,
     });

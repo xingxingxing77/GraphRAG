@@ -87,17 +87,27 @@ class AliasTable:
         Args:
             groups: YAML groups 段（canonical/type/aliases）。
         """
+        import logging as _log
+
         self.index: dict[str, tuple[str, str]] = {}
         for group in groups:
             canonical = str(group.get("canonical", "")).strip()
             etype = str(group.get("type", "Other")).strip()
             if not canonical:
                 continue
-            self.index[normalize_name(canonical)] = (canonical, etype)
+            key_c = normalize_name(canonical)
+            if key_c in self.index:
+                _log.getLogger(__name__).warning("别名冲突 canonical %r 覆盖已有 %r", canonical, self.index[key_c])
+            self.index[key_c] = (canonical, etype)
             for alias in group.get("aliases") or []:
+                if alias is None or str(alias).strip() == "":
+                    continue
                 key = normalize_name(str(alias))
-                if key:
-                    self.index[key] = (canonical, etype)
+                if not key:
+                    continue
+                if key in self.index:
+                    _log.getLogger(__name__).warning("别名冲突 %r 指向 %r 覆盖已有 %r", alias, canonical, self.index[key])
+                self.index[key] = (canonical, etype)
 
     def lookup(self, name: str) -> tuple[str, str] | None:
         """按提及查别名表。

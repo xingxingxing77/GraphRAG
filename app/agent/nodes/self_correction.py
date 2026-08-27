@@ -16,6 +16,7 @@ from typing import Any
 
 # --- 本地模块 ---
 from app.agent.state import AgentState
+from app.llm.registry import get_registry
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +38,6 @@ def _get_llm() -> Any:
     Returns:
         LLMClient: 绑定 judge 角色的客户端。
     """
-    from app.llm.registry import get_registry
-
     return get_registry().for_role("judge")
 
 

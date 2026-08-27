@@ -11,7 +11,7 @@ const DEGRADED_TEXT: Record<string, string> = {
   "no-rerank": "精排暂不可用",
   "llm-fallback": "已切换备用模型回答",
   "no-memory": "多轮上下文暂不可用",
-  "no-cache": "缓存层不可用，已按未命中处理",
+  "no-cache": "缓存层不可用，已按未命中处理（问答不受影响，相似问题将重新计算）",
   "budget-exhausted": "复杂度超预算，答案可能不完整",
   "no-persistence": "对话未保存（存储暂不可用）",
 };

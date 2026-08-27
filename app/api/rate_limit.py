@@ -177,6 +177,12 @@ def load_concurrency_config() -> dict[str, int]:
         with open(_CONFIG_PATH, encoding="utf-8") as f:
             cfg = yaml.safe_load(f) or {}
         section = cfg.get("concurrency") or {}
-        return {**defaults, **{k: int(v) for k, v in section.items()}}
+        merged = {**defaults, **{k: int(v) for k, v in section.items()}}
+        # P1 M-15: 0/负值会使 Semaphore 永久阻塞，fail-fast 回退默认
+        for k, v in list(merged.items()):
+            if v <= 0:
+                logger.warning("concurrency.%s 非法值 %s，回退默认 %s", k, v, defaults[k])
+                merged[k] = defaults[k]
+        return merged
     except Exception:  # noqa: BLE001 - 配置缺失用默认
         return defaults

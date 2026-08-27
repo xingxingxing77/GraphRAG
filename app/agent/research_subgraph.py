@@ -11,6 +11,7 @@
 # --- 标准库 ---
 import asyncio
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +26,11 @@ logger = logging.getLogger(__name__)
 _CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "pipeline_config.yaml"
 
 # 整轮研究缓存（B5：整轮结果可复用；生命周期 run 内，clear_round_cache 清理）
-_ROUND_CACHE: dict[str, list[RetrievalResult]] = {}
+# P0-04: 有界TTL + 锁，防止无界增长OOM与并发写竞态
+_ROUND_CACHE_MAXSIZE = 256
+_ROUND_CACHE_TTL_S = 600  # 10min
+_ROUND_CACHE: dict[str, tuple[list[RetrievalResult], float]] = {}
+_ROUND_CACHE_LOCK = asyncio.Lock()
 
 # 单轮融合输出上限（粗排 Top-20）
 _RESEARCH_TOP_N = 20
@@ -52,6 +57,27 @@ def clear_round_cache() -> None:
     _ROUND_CACHE.clear()
 
 
+def _cache_get(query: str) -> list[RetrievalResult] | None:
+    """读取缓存（同步，需在锁外调用前已加锁或仅读；此处供带锁路径使用）。"""
+    entry = _ROUND_CACHE.get(query)
+    if entry is None:
+        return None
+    fused, ts = entry
+    if time.monotonic() - ts > _ROUND_CACHE_TTL_S:
+        _ROUND_CACHE.pop(query, None)
+        return None
+    return fused
+
+
+def _cache_set(query: str, fused: list[RetrievalResult]) -> None:
+    """写入缓存（带驱逐）。"""
+    if len(_ROUND_CACHE) >= _ROUND_CACHE_MAXSIZE:
+        # 驱逐最旧条目（按时间戳）
+        oldest_key = min(_ROUND_CACHE, key=lambda k: _ROUND_CACHE[k][1])
+        _ROUND_CACHE.pop(oldest_key, None)
+    _ROUND_CACHE[query] = (fused, time.monotonic())
+
+
 async def research_subgraph(state: AgentState) -> dict[str, Any]:
     """执行一轮完整研究：六路并行检索 → 融合。
 
@@ -72,12 +98,15 @@ async def research_subgraph(state: AgentState) -> dict[str, Any]:
 
         interrupt({"type": "research_confirm", "query": query})
 
-    # B5 整轮缓存复用：同查询不重复检索
-    if query in _ROUND_CACHE:
-        fused = _ROUND_CACHE[query]
+    # B5 整轮缓存复用：同查询不重复检索（有界TTL+锁，P0-04）
+    async with _ROUND_CACHE_LOCK:
+        cached = _cache_get(query)
+    if cached is not None:
+        fused = cached
     else:
         fused = await _run_research(query)
-        _ROUND_CACHE[query] = fused
+        async with _ROUND_CACHE_LOCK:
+            _cache_set(query, fused)
 
     # fan-in 合并去重 + 轮次计数
     existing = list(state.get("retrieved_evidence") or [])

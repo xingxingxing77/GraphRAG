@@ -15,13 +15,15 @@ from typing import Any
 
 # --- 本地模块 ---
 from app.agent.state import AgentState
+from app.api.deps import get_memory_stack
 
 logger = logging.getLogger(__name__)
+
+# 顶层已导入，避免首个 async 节点内惰性导入触发 zoneinfo/sysconfig 的 os.getcwd 阻塞
 
 
 async def _load_context(state: AgentState) -> str:
     """调用调度器组装上下文文本（异常返回空串）。"""
-    from app.api.deps import get_memory_stack
 
     stack = await get_memory_stack()
     ctx = await stack.scheduler.build_context(
@@ -46,6 +48,13 @@ async def load_memory_node(state: AgentState) -> dict[str, Any]:
     Returns:
         状态增量 {"query": 注入后查询}；无记忆或异常时返回空增量。
     """
+    # P0-04: 新 run 起点清理研究缓存（幂等，多次调用安全）
+    try:
+        from app.agent.research_subgraph import clear_round_cache
+
+        clear_round_cache()
+    except Exception:
+        pass
     try:
         context_text = await _load_context(state)
     except Exception as exc:  # noqa: BLE001 - D5：记忆故障不阻塞主链路

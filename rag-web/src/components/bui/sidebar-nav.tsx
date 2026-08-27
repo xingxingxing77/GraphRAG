@@ -10,7 +10,6 @@ import {
   Search,
   Settings,
   SquarePen,
-  UserPlus,
   X,
 } from "lucide-react";
 
@@ -29,9 +28,8 @@ import GlideMenu from "@/components/bui/primitives/glide-menu";
 
 const WORKSPACE = { key: "creamery", name: "Creamery Ops", monogram: "C" };
 
-const NAV_ITEMS = [
+const NAV_ITEMS: { key: string; label: string; icon: ReactNode; count?: string }[] = [
   { key: "home", label: "Home", icon: <Home size={18} /> },
-  { key: "invite", label: "Invite users", icon: <UserPlus size={18} />, count: "3/10" },
 ];
 
 export type SidebarRecent = {
@@ -94,7 +92,7 @@ function GlideGroup({ children }: { children: ReactNode }) {
   return (
     <GlideMenu
       rowSelector="[data-row]"
-      highlightClassName="sidebar-glide-highlight inset-x-1 rounded-[7px] bg-hover-2"
+      highlightClassName="sidebar-glide-highlight rounded-[7px] bg-hover-2"
       className="group/glide flex flex-col gap-px"
     >
       {children}
@@ -174,7 +172,6 @@ function WorkspaceMenu({
         {[
           { label: "New workspace", icon: <Plus size={16} /> },
           { label: "Workspace settings", icon: <Settings size={16} /> },
-          { label: "Invite team members", icon: <UserPlus size={16} /> },
         ].map((item) => (
           <button
             key={item.label}
@@ -211,7 +208,7 @@ export default function SidebarNav({
   onPick,
   activeNav,
   onNavigate,
-  footerLabel = "Upgrade",
+  footerLabel,
   footerIcon,
   onFooterClick,
   recents = DEFAULT_RECENTS,
@@ -437,16 +434,18 @@ export default function SidebarNav({
           </GlideGroup>
         </div>
 
-        <div className="sidebar-copy mx-2 mt-3 w-[208px] border-t border-line pt-3">
-          <button
-            type="button"
-            onClick={onFooterClick ?? onNewChat}
-            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-control bg-hover-2 text-[12.5px] font-medium text-ink transition-[background-color,transform] duration-150 hover:bg-line-strong active:scale-[0.98]"
-          >
-            {footerIcon}
-            {footerLabel}
-          </button>
-        </div>
+        {footerLabel ? (
+          <div className="sidebar-copy mx-2 mt-3 w-[208px] border-t border-line pt-3">
+            <button
+              type="button"
+              onClick={onFooterClick ?? onNewChat}
+              className="flex h-8 w-full items-center justify-center gap-1.5 rounded-control bg-hover-2 text-[12.5px] font-medium text-ink transition-[background-color,transform] duration-150 hover:bg-line-strong active:scale-[0.98]"
+            >
+              {footerIcon}
+              {footerLabel}
+            </button>
+          </div>
+        ) : null}
       </div>
     </aside>
   );

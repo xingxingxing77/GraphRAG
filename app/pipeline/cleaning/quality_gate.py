@@ -105,6 +105,7 @@ class QualityGate:
         dedup_threshold: float = 0.9,
         enable_pii_check: bool = True,
         hash_bits: int = 64,
+        sensitive_patterns: list[str] | None = None,
     ) -> None:
         """初始化 QualityGate。
 
@@ -114,6 +115,7 @@ class QualityGate:
             dedup_threshold: SimHash 相似度阈值，默认 0.9。
             enable_pii_check: 是否启用 PII 检测。
             hash_bits: SimHash 位宽。
+            sensitive_patterns: 额外 PII 正则（来自 YAML，P0-06 透传）。
         """
         self.min_length = min_length
         self.expected_languages = expected_languages or {"zh"}
@@ -121,6 +123,14 @@ class QualityGate:
         self.enable_pii_check = enable_pii_check
         self.hash_bits = hash_bits
         self._seen_fingerprints: list[int] = []
+        # 合并 YAML 传入的敏感模式（P0-06）
+        if sensitive_patterns:
+            for pat in sensitive_patterns:
+                try:
+                    compiled = re.compile(pat)
+                except re.error:
+                    continue
+                _PII_PATTERNS.append(("custom", compiled))
 
     def check(self, doc: CleanedDocument) -> QualityReport:
         """执行全部质量检查并返回报告。

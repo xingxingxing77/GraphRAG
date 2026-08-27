@@ -18,6 +18,7 @@ from typing import Any
 from app.agent.state import AgentState
 from app.api.metrics import record_degraded
 from app.core.models import Citation, RetrievalResult, SourceKind
+from app.llm.registry import get_registry
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +42,6 @@ def _get_registry() -> Any:
     Returns:
         ModelRegistry 实例。
     """
-    from app.llm.registry import get_registry
-
     return get_registry()
 
 

@@ -1,26 +1,19 @@
 /**
- * EmptyStateHero（06 §8 v1.3）：Chat 空态主区。
+ * EmptyStateHero（06 §8 v1.3 + 14 适配）：Chat 空态主区。
  * 结构："hi GraphRAG" 文案（无 logo 图片资源，J24 落地方案 §0）+
- * chips（TierSelector/ModelPicker，枚举来自 configStore）+ 居中大输入框
- * （chat-composer 落点，Enter 发送 / Shift+Enter 换行）+ 建议卡 ×3
+ * chips（TierSelector，意图定档；模型选择由输入框内置 ModelPicker 承载）+
+ * 居中大输入框（prompt-bar 落点，Enter 发送 / Shift+Enter 换行；自带
+ * @数据源 / /命令 / 模型选择器 / 语音 / + 附件能力，14 接入）+ 建议卡 ×3
  * （recommendation-card 落点，点击回填）。同时导出 Composer 供
  * ChatPage 会话态底部停靠输入条复用（双态同构，06 §7）。
  */
-import { useState } from "react";
-import { ArrowUp } from "lucide-react";
-
+import PromptBar from "@/components/bui/prompt-bar";
 import { useChatStore } from "@/stores/chatStore";
-import { useConfigStore } from "@/stores/configStore";
 
-/** 输入框样式（空态大框与会话态停靠条共用，compact 收窄）。 */
-const COMPOSER_BOX =
-  "w-full rounded-card border border-line bg-surface shadow-card transition-colors focus-within:border-line-strong";
-const COMPOSER_TEXTAREA =
-  "w-full resize-none bg-transparent text-[13px] leading-[18px] text-ink outline-none placeholder:text-ink-3";
 const CHIP_SELECT =
   "rounded-chip border border-line bg-field px-3 py-1 text-xs text-ink-2 outline-none hover:border-line-strong";
 
-/** Composer Props。 */
+/** Composer Props（已迁移至 prompt-bar，保留签名以兼容 Chat.tsx 旧 import）。 */
 export interface ComposerProps {
   /** 停靠条紧凑形态（会话态） */
   compact?: boolean;
@@ -29,49 +22,19 @@ export interface ComposerProps {
 }
 
 /**
- * 输入区（空态居中大框 / 会话态底部停靠条，双态同构）。
+ * 会话态底部停靠输入条（已用 prompt-bar 实现，14 接入）。
  *
  * @param props - 见 ComposerProps。
- * @returns 输入区元素。
+ * @returns PromptBar 实例。
  */
-export function Composer({ compact = false, onSubmit }: ComposerProps) {
-  const [value, setValue] = useState("");
-
-  /** 提交（空串拦截；提交后清空）。 */
-  function submit() {
-    const q = value.trim();
-    if (!q) return;
-    setValue("");
-    onSubmit(q);
-  }
-
+export function Composer({ onSubmit }: ComposerProps) {
   return (
-    <div className={COMPOSER_BOX}>
-      <textarea
-        rows={compact ? 1 : 3}
-        className={`${COMPOSER_TEXTAREA} ${compact ? "px-3.5 pb-1 pt-2.5" : "px-4 pb-1 pt-3.5"}`}
-        placeholder="输入你的问题…"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            submit();
-          }
-        }}
-      />
-      <div className={`flex items-center ${compact ? "px-2.5 pb-2" : "px-3 pb-2.5"}`}>
-        <span className="flex-1" />
-        <button
-          className="flex h-8 w-8 items-center justify-center rounded-control bg-ink text-surface transition-[background-color,color,transform] hover:bg-ink-2 active:scale-[0.94] disabled:bg-line-strong disabled:text-ink-2"
-          disabled={!value.trim()}
-          onClick={submit}
-          aria-label="发送"
-        >
-          <ArrowUp size={15} />
-        </button>
-      </div>
-    </div>
+    <PromptBar
+      demo={false}
+      variant="Pill"
+      placeholder="输入你的问题…"
+      onSend={onSubmit}
+    />
   );
 }
 
@@ -99,16 +62,13 @@ const DEFAULT_SUGGESTIONS = [
 export function EmptyStateHero({ suggestions, onSubmit }: EmptyStateHeroProps) {
   const activeTier = useChatStore((s) => s.activeTier);
   const setActiveTier = useChatStore((s) => s.setActiveTier);
-  const model = useChatStore((s) => s.model);
-  const setModel = useChatStore((s) => s.setModel);
-  const models = useConfigStore((s) => s.models);
 
   return (
     <div className="flex h-full flex-col items-center justify-center px-6">
       {/* 标语文案（无 logo / 无版本徽章） */}
       <h1 className="mb-8 text-2xl font-semibold tracking-tight text-ink">hi GraphRAG</h1>
 
-      {/* chips：档位 + 模型（prompt-bar 落点） */}
+      {/* chips：仅档位（模型选择由输入框内置 ModelPicker 承载，输入框不受影响） */}
       <div className="mb-4 flex items-center gap-2">
         <select
           className={CHIP_SELECT}
@@ -123,24 +83,17 @@ export function EmptyStateHero({ suggestions, onSubmit }: EmptyStateHeroProps) {
           <option value="standard">standard</option>
           <option value="deep">deep</option>
         </select>
-        <select
-          className={CHIP_SELECT}
-          value={model ?? ""}
-          onChange={(e) => setModel(e.target.value || null)}
-          aria-label="模型"
-        >
-          <option value="">默认模型</option>
-          {models.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-        </select>
       </div>
 
-      {/* 居中大输入框 */}
-      <div className="w-full max-w-2xl">
-        <Composer onSubmit={onSubmit} />
+      {/* 居中大输入框（prompt-bar tall 模式，demo=false 时 w-full 适配页面宽度） */}
+      <div className="w-full max-w-3xl">
+        <PromptBar
+          demo={false}
+          tall
+          variant="Rounded"
+          placeholder="输入你的问题…"
+          onSend={onSubmit}
+        />
       </div>
 
       {/* 建议卡（recommendation-card 落点） */}

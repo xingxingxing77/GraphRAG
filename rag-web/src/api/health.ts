@@ -20,8 +20,20 @@ export interface ReadyResponse {
 
 /** 根地址实例（VITE_API_BASE 形如 http://host:8000/api/v1）。 */
 const root = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE.replace(/\/api\/v1\/?$/, ""),
+  baseURL: (import.meta.env.VITE_API_BASE ?? "").replace(/\/api\/v1\/?$/, ""),
   timeout: 10_000,
+});
+
+root.interceptors.response.use((res) => {
+  const h = res.headers as Record<string, unknown>;
+  const deg = (h["x-degraded"] as string | undefined) ?? (h["X-Degraded"] as string | undefined);
+  if (deg) {
+    // 动态导入避免循环
+    import("@/stores/chatStore").then(({ useChatStore }) => {
+      useChatStore.getState().pushDegraded(deg.split(","));
+    });
+  }
+  return res;
 });
 
 /** 聚合就绪探测（Admin 总览 HealthOverview 数据源）。 */

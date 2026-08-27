@@ -111,6 +111,17 @@ class QdrantDBClient:
         """
         client = await self._ensure_client()
         if await client.collection_exists(collection_name):
+            # 自愈：rag_cache 等依赖 payload 索引的集合，确保关键字段索引存在
+            # （缺失会导致 Range 过滤恒 miss / 失效联动不生效，变相 no-cache）
+            if collection_name in ("rag_cache", "rag_episodic"):
+                try:
+                    await self.ensure_payload_index(collection_name, "created_at")
+                    if collection_name == "rag_cache":
+                        await self.ensure_payload_index(collection_name, "matched_doc_ids")
+                except Exception as exc:  # noqa: BLE001
+                    import logging as _log
+
+                    _log.getLogger(__name__).warning("ensure_payload_index 自愈失败 %s: %s", collection_name, exc)
             return
         await client.create_collection(
             collection_name=collection_name,
@@ -120,6 +131,16 @@ class QdrantDBClient:
             sparse_vectors_config={SPARSE_VECTOR_NAME: SparseVectorParams()},
             hnsw_config=HnswConfigDiff(m=16, ef_construct=200),
         )
+        # 新建后立即建 payload 索引（避免首批写入后过滤不生效）
+        if collection_name in ("rag_cache", "rag_episodic"):
+            try:
+                await self.ensure_payload_index(collection_name, "created_at")
+                if collection_name == "rag_cache":
+                    await self.ensure_payload_index(collection_name, "matched_doc_ids")
+            except Exception as exc:  # noqa: BLE001
+                import logging as _log
+
+                _log.getLogger(__name__).warning("ensure_payload_index 自愈失败 %s: %s", collection_name, exc)
 
     async def upsert_points(
         self,
@@ -400,6 +421,42 @@ class QdrantDBClient:
         client = await self._ensure_client()
         result = await client.get_collections()
         return [c.name for c in result.collections]
+
+    async def ensure_payload_index(self, collection_name: str, field_name: str) -> None:
+        """幂等创建 payload 索引（Range/Keyword，按字段自动推断）。
+
+        rag_cache 的 created_at（integer）与 matched_doc_ids（keyword 数组）
+        需建索引后 Range/匹配过滤才高效且可靠；缺失时变相恒 miss 触发 no-cache。
+
+        Args:
+            collection_name: 集合名。
+            field_name: payload 字段名。
+        """
+        client = await self._ensure_client()
+        # 已存在则跳过（用 get_collection 探查 payload_schema）
+        try:
+            info = await client.get_collection(collection_name)
+            schema = getattr(info.config.params, "payload_schema", None) or getattr(
+                info, "payload_schema", None
+            )
+            if schema and field_name in schema:
+                return
+        except Exception:
+            pass
+        # 按字段类型选择索引
+        field_type = "integer" if field_name == "created_at" else "keyword"
+        try:
+            await client.create_payload_index(
+                collection_name=collection_name,
+                field_name=field_name,
+                field_schema=field_type,  # type: ignore[arg-type]
+            )
+        except Exception as exc:
+            # 已存在或并发创建竞争，记录后忽略（P1 M-04）
+            import logging as _log
+
+            _log.getLogger(__name__).debug("ensure_payload_index 忽略异常 %s/%s: %s", collection_name, field_name, exc)
+            return
 
     async def check_health(self) -> bool:
         """检查 Qdrant 连接健康状态。

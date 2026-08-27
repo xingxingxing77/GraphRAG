@@ -15,13 +15,27 @@
 import asyncio
 import hashlib
 import logging
-from pathlib import Path
+import os
 from typing import Any
+
+import yaml
 
 # --- 本地模块 ---
 from app.agent.state import AgentState
+from app.core.config import get_settings
 from app.core.models import PlanStep, RetrievalResult, SourceKind
+from app.db.es_client import ESClient
+from app.db.neo4j_client import Neo4jClient
+from app.db.qdrant_client import QdrantDBClient
+from app.embedding.ollama_client import OllamaClient
+from app.embedding.service import BgeM3EmbeddingService
 from app.retrieval.base import BaseRetriever
+from app.retrieval.dense_retriever import DenseRetriever
+from app.retrieval.fulltext_retriever import FullTextRetriever
+from app.retrieval.global_retriever import GlobalRetriever
+from app.retrieval.graph_retriever import GraphRetriever
+from app.retrieval.sparse_retriever import SparseRetriever
+from app.retrieval.web_retriever import WebRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +45,23 @@ _ALLOWED_TOOLS = {s.value for s in SourceKind}
 # 每步召回数（粗排口径）
 _STEP_TOP_K = 10
 
-_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "pipeline_config.yaml"
+_CONFIG_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "config",
+    "pipeline_config.yaml",
+)
+# 启动期缓存 agent 配置，避免首个 async 节点内读盘触发 Blocking
+_AGENT_CFG_CACHE: dict[str, Any] | None = None
+try:
+    with open(_CONFIG_PATH, encoding="utf-8") as _f:
+        _raw_cfg = yaml.safe_load(_f) or {}
+        _AGENT_CFG_CACHE = _raw_cfg.get("agent") or None
+except Exception:
+    _AGENT_CFG_CACHE = None
 
 
 def _load_agent_config() -> dict[str, Any]:
-    """读取 pipeline_config.yaml agent 段（8.2 默认值兜底）。
+    """读取 pipeline_config.yaml agent 段（启动期已缓存，async 内零 I/O）。
 
     Returns:
         agent 配置字典（含 parallel_fanout/tool_memo/evidence_prune）。
@@ -45,9 +71,9 @@ def _load_agent_config() -> dict[str, Any]:
         "tool_memo": {"enabled": True},
         "evidence_prune": {"keep_score": 0.25, "max_content_chars": 600},
     }
+    if _AGENT_CFG_CACHE is not None:
+        return {**defaults, **_AGENT_CFG_CACHE}
     try:
-        import yaml
-
         with open(_CONFIG_PATH, encoding="utf-8") as f:
             cfg = yaml.safe_load(f) or {}
         agent_cfg = cfg.get("agent") or {}
@@ -268,19 +294,7 @@ async def _get_retriever_hub() -> dict[str, BaseRetriever]:
     if _hub is not None:
         return _hub
 
-    # --- 本地模块（延迟导入避免环） ---
-    from app.core.config import get_settings
-    from app.db.es_client import ESClient
-    from app.db.neo4j_client import Neo4jClient
-    from app.db.qdrant_client import QdrantDBClient
-    from app.embedding.ollama_client import OllamaClient
-    from app.embedding.service import BgeM3EmbeddingService
-    from app.retrieval.dense_retriever import DenseRetriever
-    from app.retrieval.fulltext_retriever import FullTextRetriever
-    from app.retrieval.global_retriever import GlobalRetriever
-    from app.retrieval.graph_retriever import GraphRetriever
-    from app.retrieval.sparse_retriever import SparseRetriever
-    from app.retrieval.web_retriever import WebRetriever
+    # 顶层已导入，此处不再惰性导入以避免首个 async 节点内触发 import 阻塞
 
     settings = get_settings()
     qdrant = QdrantDBClient(host=settings.qdrant_host, port=settings.qdrant_port)

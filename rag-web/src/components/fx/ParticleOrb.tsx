@@ -4,7 +4,7 @@
  * 纯 Canvas 2D + rAF，零依赖（J24/08 R4 合规）。三层粒子：
  * 球壳（斐波那契分布、极点加密）+ 赤道波形带 + 球外环境散点；
  * 光标经逆旋转映射进模型空间形成真 3D 位移场（推开→悬浮→弱回弹）。
- * 常量 1:1 取自参考实现；prefers-reduced-motion 时仅渲染静帧。
+ * 常量 1:1 取自参考实现；prefers-reduced-motion 时低帧微动（§4，~4fps 降速+禁用推力）。
  */
 import { useEffect, useRef } from "react";
 
@@ -77,7 +77,22 @@ export default function ParticleOrb({ anchorRef, className }: ParticleOrbProps) 
     const stage: HTMLElement | null = wrap.parentElement;
     const anchor: HTMLElement | null = anchorRef?.current ?? stage;
 
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // 动画控制：默认遵循系统 prefers-reduced-motion。reduce 时不静帧，
+    // 而改低帧微动（B 方案，§4：~4fps 节流 + 降速 15%~20% + 禁用鼠标 3D 推力），
+    // 既保留品牌视觉又满足“减少而非消除”的 WCAG reduce 语义。
+    // URL 加 ?forceAnimation=1 可强制全速（调试/演示），优先级高于系统设置。
+    const forceAnimation = new URLSearchParams(window.location.search).get("forceAnimation") === "1";
+    const mql = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let reduce = mql.matches && !forceAnimation;
+    const onReduceChange = (e: MediaQueryListEvent): void => {
+      reduce = e.matches && !forceAnimation;
+    };
+    // Safari <14 用 addListener
+    if (typeof mql.addEventListener === "function") {
+      mql.addEventListener("change", onReduceChange);
+    } else {
+      mql.addListener(onReduceChange);
+    }
     const small = Math.min(window.innerWidth, window.innerHeight) < 700;
 
     // ── 常量表（1:1，见方案 §3）──
@@ -132,15 +147,23 @@ export default function ParticleOrb({ anchorRef, className }: ParticleOrbProps) 
 
     function resize(): void {
       const dpr = window.devicePixelRatio || 1;
-      W = canvas.clientWidth;
-      H = canvas.clientHeight;
-      canvas.width = Math.round(W * dpr);
-      canvas.height = Math.round(H * dpr);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      CX = W / 2;
-      CY = H / 2;
-      RADIUS = Math.min(W, H) * 0.255;
-      CAM = RADIUS * 3.0;
+      const newW = canvas.clientWidth;
+      const newH = canvas.clientHeight;
+      // 防御：resize 触发时若 layout 尚未稳定，clientWidth/Height 可能短暂为 0。
+      // 此时若直接覆盖 RADIUS 会令球体瞬间消失（粒子都画在 cx/cy=0 一点）。
+      // 策略：尺寸异常则保留上次的有效值，仅执行 positionOrb/buildStrays 重定位
+      // （让 wrap.style.top 跟随卡片中心），等下一次有效 resize 再更新 RADIUS/CAM。
+      if (newW > 0 && newH > 0) {
+        W = newW;
+        H = newH;
+        canvas.width = Math.round(W * dpr);
+        canvas.height = Math.round(H * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        CX = W / 2;
+        CY = H / 2;
+        RADIUS = Math.min(W, H) * 0.255;
+        CAM = RADIUS * 3.0;
+      }
       positionOrb();
       buildStrays();
     }
@@ -198,20 +221,38 @@ export default function ParticleOrb({ anchorRef, className }: ParticleOrbProps) 
     }
 
     let rafId = 0;
+    // reduce 分支节流（B 方案，§4）
+    const REDUCED_FPS = 4;
+    const REDUCED_INTERVAL = 1000 / REDUCED_FPS; // 250ms
+    let lastReducedDraw = -Infinity;
 
     function loop(now: number): void {
+      // reduce 时节流：仍排期 rAF（后台自动暂停），但跳过绘制以降帧
+      if (reduce) {
+        if (now - lastReducedDraw < REDUCED_INTERVAL) {
+          rafId = requestAnimationFrame(loop);
+          return;
+        }
+        lastReducedDraw = now;
+      }
+
       mouse.x += (mouse.tx - mouse.x) * MOUSE_LERP;
       mouse.y += (mouse.ty - mouse.y) * MOUSE_LERP;
 
-      const ang = now * ROT_SPEED;
+      // reduce 时降速（不改正常常量，仅派生效速）
+      const effRotSpeed = reduce ? ROT_SPEED * 0.15 : ROT_SPEED;
+      const effFlowSpeed = reduce ? FLOW_SPEED * 0.2 : FLOW_SPEED;
+      const ang = now * effRotSpeed;
       const cosY = Math.cos(ang);
       const sinY = Math.sin(ang);
       const cosX = Math.cos(TILT);
       const sinX = Math.sin(TILT);
-      const t = now * FLOW_SPEED;
+      const t = now * effFlowSpeed;
 
       // 光标映射到球面正面半球，再逆旋转入单位球局部空间（真 3D 推力）
-      const active = mouse.tx > -9000;
+      // reduce 时禁用推力（置 active=false），避免大位移前庭刺激
+      const rawActive = mouse.tx > -9000;
+      const active = rawActive && !reduce;
       let mlx = 0;
       let mly = 0;
       let mlz = 0;
@@ -313,10 +354,13 @@ export default function ParticleOrb({ anchorRef, className }: ParticleOrbProps) 
       // 环境散点：球外 2D 漂移 + 闪烁
       const sExcl = RADIUS * STRAY_EXCL;
       const sBand = RADIUS * 0.22;
+      // reduce 时散点慢漂（30%）+ 闪烁放缓（50%）
+      const straySpeedScale = reduce ? 0.3 : 1;
+      const twinkleSpeedScale = reduce ? 0.5 : 1;
       for (let s = 0; s < strays.length; s++) {
         const p = strays[s];
-        p.x += p.vx;
-        p.y += p.vy;
+        p.x += p.vx * straySpeedScale;
+        p.y += p.vy * straySpeedScale;
         if (p.x < 0) p.x += W;
         else if (p.x > W) p.x -= W;
         if (p.y < 0) p.y += H;
@@ -324,7 +368,7 @@ export default function ParticleOrb({ anchorRef, className }: ParticleOrbProps) 
         const dist = Math.hypot(p.x - CX, p.y - CY);
         if (dist < sExcl) continue;
         const edge = Math.min(1, (dist - sExcl) / sBand);
-        const twinkle = 0.6 + 0.4 * Math.sin(now * p.tws + p.tw);
+        const twinkle = 0.6 + 0.4 * Math.sin(now * p.tws * twinkleSpeedScale + p.tw);
         const alpha = p.base * twinkle * edge;
         if (alpha <= 0.01) continue;
         ctx.fillStyle = `rgba(255, 255, 255, ${alpha.toFixed(3)})`;
@@ -332,7 +376,7 @@ export default function ParticleOrb({ anchorRef, className }: ParticleOrbProps) 
       }
 
       ctx.globalCompositeOperation = "source-over";
-      if (!reduce) rafId = requestAnimationFrame(loop);
+      rafId = requestAnimationFrame(loop);
     }
 
     function onMove(clientX: number, clientY: number): void {
@@ -362,14 +406,23 @@ export default function ParticleOrb({ anchorRef, className }: ParticleOrbProps) 
 
     resize();
     build();
+    // 首帧：reduce 时用随机相位快照（避免 t=0 最平坦波形被误判为加载失败）
     if (reduce) {
-      loop(0);
+      const jitter = Math.random() * 6000;
+      // 置 lastReducedDraw 让首帧立即绘制
+      lastReducedDraw = jitter - REDUCED_INTERVAL;
+      loop(jitter);
     } else {
       rafId = requestAnimationFrame(loop);
     }
 
     return () => {
       cancelAnimationFrame(rafId);
+      if (typeof mql.removeEventListener === "function") {
+        mql.removeEventListener("change", onReduceChange);
+      } else {
+        mql.removeListener(onReduceChange);
+      }
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseleave", onMouseLeave);
       document.removeEventListener("touchmove", onTouchMove);

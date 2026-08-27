@@ -14,6 +14,8 @@ import logging
 
 # --- 本地模块 ---
 from app.agent.state import AgentState
+from app.api.deps import get_memory_stack
+from app.memory.semantic_cache import L1Entry
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +49,6 @@ async def write_back_node(state: AgentState) -> dict[str, object]:
     if not answer or state.get("degraded", False):
         return {}  # 空答案/降级作答不落任何记忆与缓存（D5/H2）
 
-    from app.api.deps import get_memory_stack
-
     try:
         stack = await get_memory_stack()
     except Exception as exc:  # noqa: BLE001 - 存储不可达不影响应答交付
@@ -75,8 +75,6 @@ async def write_back_node(state: AgentState) -> dict[str, object]:
     if history_len == 0:
         try:
             usage = state.get("token_usage") or []
-            from app.memory.semantic_cache import L1Entry
-
             await stack.semantic_cache.set_l1(
                 L1Entry(
                     question=question,

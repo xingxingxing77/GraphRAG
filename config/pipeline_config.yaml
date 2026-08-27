@@ -97,6 +97,8 @@ retrieval:
     dense: 0.4
     sparse: 0.2
     graph: 0.3
+    global: 0.2
+    fulltext: 0.2
     web: 0.1
 
 # 查询理解层（架构 L2 v3.1）：chitchat 规则前置（J18 热更）

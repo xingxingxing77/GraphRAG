@@ -126,16 +126,28 @@ class Neo4jClient:
 
         Args:
             entity_names: 实体名称列表（canonical_name）。
-            relationship_depth: 关系扩展深度（跳数）。
+            relationship_depth: 关系扩展深度（跳数，上限 5 防 DOS）。
 
         Returns:
             匹配的实体及其关系的字典列表。
         """
-        # Local Search 图检索模板（04 §5.4）：
-        #   MATCH (e:Entity {canonical_name: $entity})-[r]-(n) RETURN e, r, n
-        # 当前由 graph_retriever 经 execute_cypher 落地；本方法为
-        # 04 §5.4 Local Search 的显式接口占位，随专项接线启用。
-        raise NotImplementedError
+        if not entity_names:
+            return []
+        depth = max(1, min(int(relationship_depth), 5))
+        # 批量查询：对每个实体名扩展 depth 跳内邻居
+        results: list[dict[str, Any]] = []
+        for name in entity_names:
+            cypher = (
+                "MATCH (e:Entity {canonical_name: $name})"
+                f"-[r*1..{depth}]-(n:Entity) "
+                "RETURN e.canonical_name AS entity, type(r[0]) AS rel, n.canonical_name AS neighbor, n LIMIT 20"
+            )
+            try:
+                rows = await self.execute_cypher(cypher, {"name": name})
+                results.extend(rows)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("find_entities 失败 %s: %s", name, exc)
+        return results
 
     async def check_health(self) -> bool:
         """检查 Neo4j 连接健康状态。
@@ -146,5 +158,6 @@ class Neo4jClient:
         try:
             rows = await self.execute_cypher("RETURN 1 AS ok")
             return bool(rows) and rows[0].get("ok") == 1
-        except Exception:  # noqa: BLE001 - 健康检查不抛错
+        except Exception as exc:  # noqa: BLE001 - 健康检查不抛错
+            logger.debug("Neo4j 健康检查失败: %s: %s", type(exc).__name__, exc)
             return False

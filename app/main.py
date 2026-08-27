@@ -36,6 +36,7 @@ from app.api.endpoints import (
     ingestion,
     metrics,
     parsing,
+    prompt_bar,
     qdrant_debug,
     sessions,
 )
@@ -55,17 +56,40 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Yields:
         None
     """
+    # 生产密钥强校验（fail-fast，P0-01）
+    try:
+        get_settings().validate_prod_secrets()
+    except SystemExit as exc:
+        logger.critical("配置校验失败拒绝启动: %s", exc)
+        raise
+
     # LangSmith 接入（单元 3.6）：env 驱动，密钥就绪后 trace 回放生效
     tracing = os.environ.get("LANGCHAIN_TRACING_V2", "false").lower() in ("1", "true")
     logger.info(
         "LangSmith tracing: %s（密钥就绪后自动生效，遗留登记见 10.x）",
         "on" if tracing else "off",
     )
-    # TODO: 初始化 Neo4j 驱动、Qdrant 客户端、Redis 客户端（10.1）
-    # TODO: 初始化 ES 客户端与 Postgres checkpoint 连接
-    # TODO: 初始化 Embedding 服务与 LLM 注册表（fail-fast，05 §6）
+    # 预热核心依赖（P0-02/P0-03：避免首请求冷启动竞态与连接泄漏）
+    try:
+        from app.api.deps import get_qdrant_client, get_redis_client
+
+        # 仅预热轻量客户端；Embedding/LLM 仍惰性加载（模型体积大）
+        async for _ in get_qdrant_client():
+            pass
+        async for _ in get_redis_client():
+            pass
+        logger.info("核心存储客户端预热完成（Qdrant/Redis）")
+    except Exception as exc:  # noqa: BLE001 - 预热失败不阻塞启动，首请求降级
+        logger.warning("存储客户端预热失败（首请求惰性重试）: %s", exc)
     yield
-    # TODO: 关闭所有数据库连接
+    # 优雅关闭（P0-02）
+    try:
+        from app.api.deps import close_all_clients
+
+        await close_all_clients()
+        logger.info("全部客户端连接已关闭")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("关闭客户端时异常: %s", exc)
 
 
 def create_app() -> FastAPI:
@@ -118,12 +142,15 @@ def create_app() -> FastAPI:
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
         """Pydantic 校验失败 → 400 SYS_400_VALIDATION（02 §2.3/§6，v1.1 补登）。"""
+        # exc.errors() 的 ctx 可能含 ValueError 等不可 JSON 序列化对象，需经 jsonable_encoder
+        from fastapi.encoders import jsonable_encoder
+
         return JSONResponse(
             status_code=400,
             content={
                 "code": ErrorCode.SYS_400_VALIDATION.value,
                 "message": "参数校验失败",
-                "detail": exc.errors(),
+                "detail": jsonable_encoder(exc.errors()),
             },
         )
 
@@ -152,6 +179,7 @@ def create_app() -> FastAPI:
     app.include_router(feedback.router, prefix="/api/v1/feedback", tags=["feedback"])
     app.include_router(graph.router, prefix="/api/v1/graph", tags=["graph"])
     app.include_router(config.router, prefix="/api/v1/config", tags=["config"])
+    app.include_router(prompt_bar.router, prefix="/api/v1/prompt-bar", tags=["prompt-bar"])
     app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
     app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
     app.include_router(ingestion.router, prefix="/api/v1/admin", tags=["admin"])

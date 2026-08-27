@@ -307,7 +307,8 @@ class ESClient:
             client = await self._ensure_client()
             await client.ping()
             return True
-        except Exception:  # noqa: BLE001 - 健康检查不抛错
+        except Exception as exc:  # noqa: BLE001 - 健康检查不抛错，细分日志
+            logger.debug("ES 健康检查失败: %s: %s", type(exc).__name__, exc)
             return False
 
     async def ik_available(self) -> bool:

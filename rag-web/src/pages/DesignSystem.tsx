@@ -33,7 +33,7 @@ const SECTIONS: { no: string; title: string; el: React.ReactNode }[] = [
   { no: "05", title: "Tool Chips", el: <ToolChips /> },
   { no: "06", title: "Task Rows", el: <TaskRows /> },
   { no: "07", title: "Chat Composer", el: <ChatComposer /> },
-  { no: "08", title: "Prompt Bar", el: <PromptBar /> },
+  { no: "08", title: "Prompt Bar", el: <PromptBar demo tall /> },
   { no: "09", title: "Recommendation Card", el: <RecommendationCard /> },
   { no: "10", title: "Context Cards", el: <ContextCards /> },
   { no: "11", title: "Diff Table", el: <DiffTable /> },

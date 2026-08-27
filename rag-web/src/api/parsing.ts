@@ -9,11 +9,7 @@ import type { ParsingPreviewResponse } from "@/types";
 export function previewFile(file: File): Promise<ParsingPreviewResponse> {
   const form = new FormData();
   form.append("file", file);
-  return http
-    .post<ParsingPreviewResponse>("/admin/parsing/preview", form, {
-      headers: { "Content-Type": "multipart/form-data" },
-    })
-    .then((r) => r.data);
+  return http.post<ParsingPreviewResponse>("/admin/parsing/preview", form).then((r) => r.data);
 }
 
 /** 按 doc_id 解析预览（最近采集批次）。 */

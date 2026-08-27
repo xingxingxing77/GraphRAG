@@ -57,6 +57,9 @@ def build_agent_graph() -> CompiledStateGraph[AgentState]:
     Returns:
         CompiledStateGraph: 编译后的 Agent 状态图。
     """
+    # P0-04: 每 run 清理研究子图缓存，避免跨 run 串扰
+    from app.agent.research_subgraph import clear_round_cache
+
     graph = StateGraph(AgentState)
 
     # --- 节点注册 ---

@@ -97,6 +97,45 @@ class AppSettings(BaseSettings):
     )
     token_ttl_seconds: int = Field(default=86400, description="JWT 有效期（秒）")
 
+    # --- 安全默认值标记（P0-01 fail-fast 用） ---
+    _DEV_JWT_SECRET = "dev-insecure-secret-please-replace-in-prod-env"
+    _DEV_ADMIN_PASSWORD = "admin-dev-password"
+    _DEV_API_KEY = "dev-api-key-0001"
+
+    def is_dev_defaults(self) -> bool:
+        """是否仍使用开发默认密钥（生产应经 env 注入覆盖）。"""
+        return (
+            self.jwt_secret == self._DEV_JWT_SECRET
+            or self.admin_password == self._DEV_ADMIN_PASSWORD
+            or self.valid_api_keys == self._DEV_API_KEY
+        )
+
+    def validate_prod_secrets(self) -> None:
+        """生产环境强校验：dev 默认密钥未覆盖则拒绝启动（fail-fast，D7/J16）。
+
+        Raises:
+            SystemExit: 仍使用 dev 默认密钥且非显式 dev 环境。
+        """
+        # 显式 dev 模式放行（DEBUG=true 或 ENV=dev/test）
+        env_marker = (os.environ.get("ENV", "") + os.environ.get("APP_ENV", "")).lower()
+        if self.debug or env_marker in ("dev", "test", "development", "devtest"):
+            return
+        if self.jwt_secret == self._DEV_JWT_SECRET:
+            raise SystemExit(
+                "[fail-fast] JWT_SECRET 仍为开发默认值，生产必须经环境变量注入 ≥32 字节随机值（D7/J16）"
+            )
+        if len(self.jwt_secret) < 32:
+            raise SystemExit("[fail-fast] JWT_SECRET 长度不足 32 字节，拒绝启动")
+        if self.admin_password == self._DEV_ADMIN_PASSWORD:
+            raise SystemExit("[fail-fast] ADMIN_PASSWORD 仍为开发默认值，生产必须覆盖")
+        if self.valid_api_keys == self._DEV_API_KEY:
+            # valid_api_keys 为可选但若使用 api_key grant 则必须覆盖；此处警告
+            import logging as _log
+
+            _log.getLogger(__name__).warning(
+                "[security] VALID_API_KEYS 仍为开发默认值，若启用 api_key 鉴权请覆盖"
+            )
+
     # Ollama 配置
     ollama_base_url: str = Field(default="http://localhost:11434", description="Ollama 服务地址")
     langgraph_server_url: str = Field(

@@ -17,8 +17,10 @@ decomposer/entity_extractor 已并入合并调用输出 Schema（删除独立类
 # --- 标准库 ---
 import json
 import logging
-from pathlib import Path
+import os
 from typing import Any
+
+import yaml
 
 # --- 本地模块 ---
 from app.core.models import (
@@ -27,10 +29,24 @@ from app.core.models import (
     LatencyTier,
     QueryUnderstandingResult,
 )
+from app.llm.registry import get_registry
 
 logger = logging.getLogger(__name__)
 
-_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "pipeline_config.yaml"
+# 绝对路径经 os.path.abspath 推导，避免 Path.resolve → os.getcwd 阻塞（langgraph dev 检测）
+_CONFIG_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "config",
+    "pipeline_config.yaml",
+)
+# 启动期预加载 chitchat 规则，避免首个 async 节点内首次读文件触发 Blocking
+_CONFIG_CACHE: dict[str, Any] | None = None
+try:
+    with open(_CONFIG_PATH, encoding="utf-8") as _f:
+        _raw = yaml.safe_load(_f) or {}
+        _CONFIG_CACHE = ((_raw.get("query_understanding") or {}).get("chitchat_rules")) or None
+except Exception:
+    _CONFIG_CACHE = None
 
 # IntentType 合法值集合（解析校验）
 _INTENT_VALUES = {i.value for i in IntentType}
@@ -56,7 +72,7 @@ _QU_SYSTEM_PROMPT = """你是 GraphRAG 系统的查询理解器。分析用户�
 
 
 def _load_chitchat_rules() -> dict[str, Any]:
-    """读取 chitchat 规则表（J18 热更：每次调用现读配置）。
+    """读取 chitchat 规则表（启动期已预加载，async 内零 I/O）。
 
     Returns:
         规则字典（max_length/greeting_words/question_words），缺失用默认。
@@ -66,15 +82,34 @@ def _load_chitchat_rules() -> dict[str, Any]:
         "greeting_words": ["你好", "您好", "hello", "hi"],
         "question_words": ["怎么做", "如何", "为什么", "是什么"],
     }
+    raw_rules: dict[str, Any] | None = None
+    # 优先用启动期缓存；热更需求可经外部触发重载，此处不再每次读盘避免 Blocking
+    if _CONFIG_CACHE is not None:
+        raw_rules = dict(_CONFIG_CACHE)
+    else:
+        # 回退：仅当缓存未就绪时同步读（极少路径，仍保持兼容）
+        try:
+            with open(_CONFIG_PATH, encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+            raw_rules = ((cfg.get("query_understanding") or {}).get("chitchat_rules")) or {}
+        except Exception:  # noqa: BLE001 - 配置缺失用默认
+            return defaults
+    # P1 M-18: 类型校验——字符串误为标量时避免字符级遍历
+    merged: dict[str, Any] = {**defaults, **(raw_rules or {})}
+    for key in ("greeting_words", "question_words"):
+        val = merged.get(key)
+        if isinstance(val, str):
+            logger.warning("chitchat_rules.%s 为字符串已自动包裹为列表（YAML 应为列表）", key)
+            merged[key] = [val]
+        elif not isinstance(val, list):
+            merged[key] = defaults[key]
+        else:
+            merged[key] = [str(x) for x in val if str(x).strip()]
     try:
-        import yaml
-
-        with open(_CONFIG_PATH, encoding="utf-8") as f:
-            cfg = yaml.safe_load(f) or {}
-        rules = ((cfg.get("query_understanding") or {}).get("chitchat_rules")) or {}
-        return {**defaults, **rules}
-    except Exception:  # noqa: BLE001 - 配置缺失用默认
-        return defaults
+        merged["max_length"] = int(merged.get("max_length", 12))
+    except (ValueError, TypeError):
+        merged["max_length"] = defaults["max_length"]
+    return merged
 
 
 def rule_chitchat(query: str) -> bool:
@@ -111,8 +146,6 @@ def _get_llm() -> Any:
     Returns:
         LLMClient: 绑定角色条目的客户端。
     """
-    from app.llm.registry import get_registry
-
     return get_registry().for_role("query_understanding")
 
 

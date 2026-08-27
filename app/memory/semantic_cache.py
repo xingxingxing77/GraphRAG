@@ -50,6 +50,7 @@ class L1Lookup(BaseModel):
     Attributes:
         hit: 是否命中（score ≥ 0.95）。
         degraded: 存储异常导致的降级 miss（X-Degraded: no-cache 依据）。
+        degraded_stage: 降级发生阶段（embedding | qdrant），仅 degraded=True 时有值。
         cache_score: 命中相似度分数。
         matched_query: 命中的缓存问题原文。
         answer: 缓存答案。
@@ -59,6 +60,7 @@ class L1Lookup(BaseModel):
 
     hit: bool = False
     degraded: bool = False
+    degraded_stage: str | None = None
     cache_score: float | None = None
     matched_query: str | None = None
     answer: str | None = None
@@ -138,27 +140,63 @@ class SemanticCache:
         """ANN top-1 查询 L1 语义缓存（异常降级为 miss，A-11）。
 
         读侧同时过滤过期点（created_at ≥ now-TTL），避免日清间隙
-        返回陈旧条目。
+        返回陈旧条目。异常细粒度记录阶段并上报指标，永不抛错。
 
         Args:
             query: 用户原始查询（改写前，04 §3.3 向量口径）。
 
         Returns:
-            L1Lookup: 命中详情或（降级）miss。
+            L1Lookup: 命中详情或（降级）miss（附 degraded_stage）。
         """
         try:
-            vector = await self._query_vector(query)
+            try:
+                vector = await self._query_vector(query)
+            except Exception as exc:  # noqa: BLE001 - embedding 阶段
+                logger.warning(
+                    "L1 缓存降级 no-cache（embedding 阶段 query=%.30s）: %s: %s",
+                    query,
+                    type(exc).__name__,
+                    exc,
+                )
+                try:
+                    from app.api.metrics import record_degraded  # 延迟导入防循环
+
+                    record_degraded("no-cache")
+                except Exception:
+                    pass
+                return L1Lookup(hit=False, degraded=True, degraded_stage="embedding")
             fresh_from = int(time.time()) - self.l1_ttl_seconds
             flt = Filter(
                 must=[
                     FieldCondition(key="created_at", range=Range(gte=float(fresh_from)))
                 ]
             )
-            hits = await self.qdrant.search(
-                RAG_CACHE_COLLECTION, vector, top_k=1, filter_condition=flt
+            try:
+                hits = await self.qdrant.search(
+                    RAG_CACHE_COLLECTION, vector, top_k=1, filter_condition=flt
+                )
+            except Exception as exc:  # noqa: BLE001 - qdrant 阶段
+                logger.warning(
+                    "L1 缓存降级 no-cache（qdrant 阶段 query=%.30s）: %s: %s",
+                    query,
+                    type(exc).__name__,
+                    exc,
+                )
+                try:
+                    from app.api.metrics import record_degraded
+
+                    record_degraded("no-cache")
+                except Exception:
+                    pass
+                return L1Lookup(hit=False, degraded=True, degraded_stage="qdrant")
+        except Exception as exc:  # noqa: BLE001 - 兜底（不应到达）
+            logger.warning(
+                "L1 缓存降级 no-cache（未知阶段 query=%.30s）: %s: %s",
+                query,
+                type(exc).__name__,
+                exc,
             )
-        except Exception:  # noqa: BLE001 - 缓存永不阻塞主链路（A-11）
-            return L1Lookup(hit=False, degraded=True)
+            return L1Lookup(hit=False, degraded=True, degraded_stage="unknown")
         if not hits:
             return L1Lookup(hit=False)
         top = hits[0]
@@ -185,14 +223,21 @@ class SemanticCache:
         """写入 L1 缓存条目（幂等：同问题 uuid5 覆盖写）。
 
         仅允许非个性化答案进入（个性化上下文注入过的回答由调用方
-        负责不落缓存，H2）。写入前幂等确保集合存在；失败静默——
-        缓存写失败不影响主链路。
+        负责不落缓存，H2）。写入前幂等确保集合存在（含 payload 索引自愈）；
+        失败静默——缓存写失败不影响主链路。
 
         Args:
             entry: 待缓存条目。
         """
         try:
             await self.qdrant.ensure_collection(RAG_CACHE_COLLECTION)
+            # 自愈：确保 created_at 范围索引存在（缺失会导致过期过滤不生效，变相恒 miss）
+            try:
+                await self.qdrant.ensure_payload_index(
+                    RAG_CACHE_COLLECTION, "created_at"
+                )
+            except Exception as exc:
+                logger.debug("ensure_payload_index 自愈忽略: %s", exc)
             vector = await self._query_vector(entry.question)
             point_id = str(
                 uuid.uuid5(_POINT_ID_NAMESPACE, self.normalize(entry.question))
@@ -214,7 +259,8 @@ class SemanticCache:
                 },
             )
             await self.qdrant.upsert_points(RAG_CACHE_COLLECTION, [point])
-        except Exception:  # noqa: BLE001 - 写失败不影响主链路
+        except Exception as exc:  # noqa: BLE001 - 写失败不影响主链路
+            logger.warning("set_l1 写入失败（question=%.30s）: %s: %s", entry.question, type(exc).__name__, exc)
             return
 
     async def invalidate_doc(self, doc_id: str) -> int:
@@ -248,7 +294,8 @@ class SemanticCache:
             return await self.qdrant.delete_created_before(
                 RAG_CACHE_COLLECTION, "created_at", current - self.l1_ttl_seconds
             )
-        except Exception:  # noqa: BLE001 - 定时任务失败仅记录不抛出
+        except Exception as exc:  # noqa: BLE001 - 定时任务失败仅记录不抛出
+            logger.warning("purge_expired 失败: %s: %s", type(exc).__name__, exc)
             return 0
 
     # ---------- single-flight ----------
@@ -308,7 +355,8 @@ class SemanticCache:
         """读取 L2 检索结果缓存（异常返回 None，不阻塞）。"""
         try:
             raw = await self.redis.get(L2_KEY_PREFIX + self.norm_hash(query, params))
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("get_l2 Redis 异常（query=%.30s）: %s: %s", query, type(exc).__name__, exc)
             return None
         if raw is None:
             return None
@@ -331,5 +379,6 @@ class SemanticCache:
                 json.dumps(results, ensure_ascii=False),
                 ttl=self.l2_ttl_seconds,
             )
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("set_l2 Redis 异常（query=%.30s）: %s: %s", query, type(exc).__name__, exc)
             return

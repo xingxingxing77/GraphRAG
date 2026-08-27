@@ -21,7 +21,7 @@ from app.api.errors import ApiError, ErrorCode
 from app.core.config import get_settings
 
 # --- PII 正则（05 §3.4 脱敏钩子） ---
-_PHONE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
+_PHONE_RE = re.compile(r"(?<!\d)(?:\+86[-\s]?)?1[3-9]\d{9}(?!\d)")
 _ID_CARD_RE = re.compile(r"(?<!\d)\d{17}[\dXx](?!\d)")
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
@@ -60,6 +60,22 @@ class MaskingFilter(logging.Filter):
             record.args = tuple(
                 mask_pii(a) if isinstance(a, str) else a for a in args
             )
+        # P1 M-09: extra 字段中的字符串同样脱敏
+        for key, val in list(record.__dict__.items()):
+            if isinstance(val, str) and key not in ("msg", "args", "levelname", "name", "pathname", "filename", "module"):
+                try:
+                    masked = mask_pii(val)
+                    if masked != val:
+                        setattr(record, key, masked)
+                except Exception:
+                    pass
+            elif isinstance(val, dict):
+                try:
+                    masked_dict = {k: mask_pii(v) if isinstance(v, str) else v for k, v in val.items()}
+                    if masked_dict != val:
+                        setattr(record, key, masked_dict)
+                except Exception:
+                    pass
         return True
 
 

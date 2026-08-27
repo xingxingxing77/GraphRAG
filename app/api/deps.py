@@ -5,10 +5,13 @@
 """
 
 # --- 标准库 ---
-from functools import lru_cache
-from pathlib import Path
-from typing import Any, AsyncGenerator
+import asyncio
 import logging
+import os
+from functools import lru_cache
+from typing import Any, AsyncGenerator
+
+import yaml
 
 # --- 第三方库 ---
 
@@ -31,7 +34,14 @@ from app.pipeline.ingestion.manifest import JsonFileManifestStore
 from app.pipeline.ingestion.service import IngestionService
 from app.reranking.reranker import BGEReranker
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# 并发锁：防止首个并发请求创建多实例覆盖连接池（P0-02）
+_neo4j_lock = asyncio.Lock()
+_qdrant_lock = asyncio.Lock()
+_es_lock = asyncio.Lock()
+_reranker_lock = asyncio.Lock()
+_redis_lock = asyncio.Lock()
 
 
 async def get_neo4j_client() -> AsyncGenerator[Neo4jClient, None]:
@@ -42,12 +52,14 @@ async def get_neo4j_client() -> AsyncGenerator[Neo4jClient, None]:
     """
     global _neo4j_client
     if _neo4j_client is None:
-        settings = get_settings()
-        _neo4j_client = Neo4jClient(
-            uri=settings.neo4j_uri,
-            user=settings.neo4j_user,
-            password=settings.neo4j_password,
-        )
+        async with _neo4j_lock:
+            if _neo4j_client is None:
+                settings = get_settings()
+                _neo4j_client = Neo4jClient(
+                    uri=settings.neo4j_uri,
+                    user=settings.neo4j_user,
+                    password=settings.neo4j_password,
+                )
     yield _neo4j_client
 
 
@@ -62,10 +74,12 @@ async def get_qdrant_client() -> AsyncGenerator[QdrantDBClient, None]:
     """
     global _qdrant_client
     if _qdrant_client is None:
-        settings = get_settings()
-        _qdrant_client = QdrantDBClient(
-            host=settings.qdrant_host, port=settings.qdrant_port
-        )
+        async with _qdrant_lock:
+            if _qdrant_client is None:
+                settings = get_settings()
+                _qdrant_client = QdrantDBClient(
+                    host=settings.qdrant_host, port=settings.qdrant_port
+                )
     yield _qdrant_client
 
 
@@ -80,8 +94,10 @@ async def get_es_client() -> AsyncGenerator[ESClient, None]:
     """
     global _es_client
     if _es_client is None:
-        settings = get_settings()
-        _es_client = ESClient(host=settings.elasticsearch_host)
+        async with _es_lock:
+            if _es_client is None:
+                settings = get_settings()
+                _es_client = ESClient(host=settings.elasticsearch_host)
     yield _es_client
 
 
@@ -96,7 +112,9 @@ async def get_reranker() -> AsyncGenerator[BGEReranker, None]:
     """
     global _reranker
     if _reranker is None:
-        _reranker = BGEReranker()
+        async with _reranker_lock:
+            if _reranker is None:
+                _reranker = BGEReranker()
     yield _reranker
 
 
@@ -111,14 +129,19 @@ async def get_redis_client() -> AsyncGenerator[RedisClient, None]:
     """
     global _redis_client
     if _redis_client is None:
-        settings = get_settings()
-        _redis_client = RedisClient(
-            host=settings.redis_host, port=settings.redis_port, db=settings.redis_db
-        )
+        async with _redis_lock:
+            if _redis_client is None:
+                settings = get_settings()
+                _redis_client = RedisClient(
+                    host=settings.redis_host, port=settings.redis_port, db=settings.redis_db
+                )
     yield _redis_client
 
 
 _redis_client: RedisClient | None = None
+
+
+_embedding_lock = asyncio.Lock()
 
 
 async def get_embedding_service() -> EmbeddingService:
@@ -132,19 +155,21 @@ async def get_embedding_service() -> EmbeddingService:
     """
     global _embedding_service
     if _embedding_service is None:
-        settings = get_settings()
-        ollama_client = OllamaClient(base_url=settings.ollama_base_url)
-        flag_client: FlagClient | None
-        try:
-            flag_client = FlagClient()  # sparse 通道（进程内 BGE-M3，H1/J3）
-        except Exception as exc:  # noqa: BLE001 - FlagEmbedding 未装/模型缺失时降级
-            logging.getLogger(__name__).warning("FlagClient 初始化失败，sparse 通道降级: %s", exc)
-            flag_client = None
-        _embedding_service = BgeM3EmbeddingService(
-            ollama_client=ollama_client,
-            model_name=settings.embedding_model,
-            flag_client=flag_client,
-        )
+        async with _embedding_lock:
+            if _embedding_service is None:
+                settings = get_settings()
+                ollama_client = OllamaClient(base_url=settings.ollama_base_url)
+                flag_client: FlagClient | None
+                try:
+                    flag_client = FlagClient()  # sparse 通道（进程内 BGE-M3，H1/J3）
+                except Exception as exc:  # noqa: BLE001 - FlagEmbedding 未装/模型缺失时降级
+                    logging.getLogger(__name__).warning("FlagClient 初始化失败，sparse 通道降级: %s", exc)
+                    flag_client = None
+                _embedding_service = BgeM3EmbeddingService(
+                    ollama_client=ollama_client,
+                    model_name=settings.embedding_model,
+                    flag_client=flag_client,
+                )
     return _embedding_service
 
 
@@ -168,7 +193,7 @@ def get_ingestion_service() -> IngestionService:
     global _ingestion_service
     if _ingestion_service is None:
         cfg = load_pipeline_config()
-        manifest = JsonFileManifestStore(_REPO_ROOT / "data" / "ingest_manifest.json")
+        manifest = JsonFileManifestStore(os.path.join(_REPO_ROOT, "data", "ingest_manifest.json"))
         _ingestion_service = IngestionService(
             manifest=manifest,
             config=cfg.pipeline.ingestion,
@@ -212,14 +237,69 @@ class MemoryStack:
 
 
 _memory_stack: MemoryStack | None = None
+_memory_stack_lock = asyncio.Lock()
+
+
+async def close_all_clients() -> None:
+    """关闭所有单例客户端（lifespan 关闭期调用，P0-02/P0-03）。"""
+    global _neo4j_client, _qdrant_client, _es_client, _redis_client, _memory_stack
+    for client in (_neo4j_client, _qdrant_client, _es_client, _redis_client):
+        if client is not None:
+            try:
+                await client.close()  # type: ignore[union-attr]
+            except Exception:
+                pass
+    if _memory_stack is not None:
+        for c in (_memory_stack.redis, _memory_stack.qdrant):
+            try:
+                await c.close()
+            except Exception:
+                pass
+        _memory_stack = None
+    _neo4j_client = _qdrant_client = _es_client = _redis_client = None
 
 # 记忆层策略参数（config/reliability.yaml memory 节，读取失败用默认；
-# 冷启动生效，J18 边界见 01 §7）
-_MEMORY_CFG_YAML = Path(__file__).resolve().parents[2] / "config" / "reliability.yaml"
+# 冷启动生效，J18 边界见 01 §7）— 用 os.path.abspath 避免 Path.resolve → os.getcwd 阻塞
+_MEMORY_CFG_YAML = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "config",
+    "reliability.yaml",
+)
+# 启动期预缓存，避免首个 async 节点内读盘触发 Blocking
+_MEMORY_CFG_CACHE: dict[str, Any] | None = None
+try:
+    with open(_MEMORY_CFG_YAML, encoding="utf-8") as _f:
+        _raw_mem = yaml.safe_load(_f) or {}
+        _MEMORY_CFG_CACHE = _raw_mem.get("memory") or None
+except Exception:
+    _MEMORY_CFG_CACHE = None
+
+
+def _cast_memory_value(raw: Any, default: Any) -> Any:
+    """类型安全转换：bool 特殊处理，避免 bool(\"false\")==True 陷阱（P0-02/M-01）。"""
+    if raw is None:
+        return default
+    if isinstance(default, bool):
+        if isinstance(raw, bool):
+            return raw
+        if isinstance(raw, str):
+            return raw.strip().lower() in ("1", "true", "yes", "on")
+        return bool(raw)
+    if isinstance(default, int) and not isinstance(default, bool):
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            return default
+    if isinstance(default, float):
+        try:
+            return float(raw)
+        except (ValueError, TypeError):
+            return default
+    return type(default)(raw)
 
 
 def _load_memory_config() -> dict[str, Any]:
-    """从 reliability.yaml 读取记忆层参数（容错回退默认值）。
+    """从 reliability.yaml 读取记忆层参数（启动期已缓存，async 内零 I/O）。
 
     Returns:
         {l1_hit_threshold, l1_ttl_seconds, l2_ttl_seconds,
@@ -239,13 +319,14 @@ def _load_memory_config() -> dict[str, Any]:
         "episodic_retention_days": 180,
         "summaries_cap": 20,
     }
+    # 优先用启动期缓存，避免每次 async 内读盘
+    if _MEMORY_CFG_CACHE is not None:
+        return {key: _cast_memory_value(_MEMORY_CFG_CACHE.get(key, default), default) for key, default in defaults.items()}
     try:
-        import yaml
-
         with open(_MEMORY_CFG_YAML, encoding="utf-8") as f:
             cfg = yaml.safe_load(f) or {}
         section = cfg.get("memory") or {}
-        return {key: type(default)(section.get(key, default)) for key, default in defaults.items()}
+        return {key: _cast_memory_value(section.get(key, default), default) for key, default in defaults.items()}
     except Exception:  # noqa: BLE001 - 配置缺失/损坏用默认
         return defaults
 
@@ -258,45 +339,47 @@ async def get_memory_stack() -> MemoryStack:
     """
     global _memory_stack
     if _memory_stack is None:
-        settings = get_settings()
-        mem = _load_memory_config()
-        redis = RedisClient(
-            host=settings.redis_host, port=settings.redis_port, db=settings.redis_db
-        )
-        qdrant = QdrantDBClient(host=settings.qdrant_host, port=settings.qdrant_port)
-        embedder = await get_embedding_service()
-        working_memory = WorkingMemory(
-            redis,
-            max_turns=mem["wm_max_turns"],
-            ttl_seconds=mem["wm_ttl_days"] * 86400,
-        )
-        episodic = EpisodicMemory(
-            qdrant, embedder, retention_days=mem["episodic_retention_days"]
-        )
-        scheduler = MemoryScheduler(
-            working_memory,
-            episodic,
-            embedder,
-            working_turns=mem["working_turns"],
-            episodic_top_m=mem["episodic_top_m"],
-            dedup_similarity_threshold=mem["dedup_similarity_threshold"],
-        )
-        semantic_cache = SemanticCache(
-            qdrant=qdrant,
-            embedder=embedder,
-            redis=redis,
-            threshold=mem["l1_hit_threshold"],
-            l1_ttl_seconds=mem["l1_ttl_seconds"],
-            l2_ttl_seconds=mem["l2_ttl_seconds"],
-        )
-        _memory_stack = MemoryStack(
-            redis=redis,
-            qdrant=qdrant,
-            working_memory=working_memory,
-            episodic=episodic,
-            scheduler=scheduler,
-            semantic_cache=semantic_cache,
-        )
+        async with _memory_stack_lock:
+            if _memory_stack is None:
+                settings = get_settings()
+                mem = _load_memory_config()
+                redis = RedisClient(
+                    host=settings.redis_host, port=settings.redis_port, db=settings.redis_db
+                )
+                qdrant = QdrantDBClient(host=settings.qdrant_host, port=settings.qdrant_port)
+                embedder = await get_embedding_service()
+                working_memory = WorkingMemory(
+                    redis,
+                    max_turns=mem["wm_max_turns"],
+                    ttl_seconds=mem["wm_ttl_days"] * 86400,
+                )
+                episodic = EpisodicMemory(
+                    qdrant, embedder, retention_days=mem["episodic_retention_days"]
+                )
+                scheduler = MemoryScheduler(
+                    working_memory,
+                    episodic,
+                    embedder,
+                    working_turns=mem["working_turns"],
+                    episodic_top_m=mem["episodic_top_m"],
+                    dedup_similarity_threshold=mem["dedup_similarity_threshold"],
+                )
+                semantic_cache = SemanticCache(
+                    qdrant=qdrant,
+                    embedder=embedder,
+                    redis=redis,
+                    threshold=mem["l1_hit_threshold"],
+                    l1_ttl_seconds=mem["l1_ttl_seconds"],
+                    l2_ttl_seconds=mem["l2_ttl_seconds"],
+                )
+                _memory_stack = MemoryStack(
+                    redis=redis,
+                    qdrant=qdrant,
+                    working_memory=working_memory,
+                    episodic=episodic,
+                    scheduler=scheduler,
+                    semantic_cache=semantic_cache,
+                )
     return _memory_stack
 
 

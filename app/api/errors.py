@@ -59,8 +59,34 @@ class ErrorCode(str, Enum):
     DEBUG_400_INVALID_SOURCE = "DEBUG_400_INVALID_SOURCE"
 
 
+_STATUS_MAP: dict[ErrorCode, int] = {
+    ErrorCode.AUTH_400_BAD_CREDENTIALS: 400,
+    ErrorCode.AUTH_401_INVALID_API_KEY: 401,
+    ErrorCode.AUTH_401_TOKEN_EXPIRED: 401,
+    ErrorCode.AUTH_401_TOKEN_INVALID: 401,
+    ErrorCode.AUTH_403_FORBIDDEN: 403,
+    ErrorCode.AUTH_429_RATE_LIMITED: 429,
+    ErrorCode.CHAT_400_EMPTY_QUERY: 400,
+    ErrorCode.CHAT_400_INVALID_TIER: 400,
+    ErrorCode.CHAT_404_THREAD_NOT_FOUND: 404,
+    ErrorCode.CHAT_429_RATE_LIMITED: 429,
+    ErrorCode.CHAT_504_TIER_TIMEOUT: 504,
+    ErrorCode.SESSION_404_NOT_FOUND: 404,
+    ErrorCode.FEEDBACK_404_MESSAGE_NOT_FOUND: 404,
+    ErrorCode.GRAPH_404_ENTITY_NOT_FOUND: 404,
+    ErrorCode.GRAPH_503_STORE_UNAVAILABLE: 503,
+    ErrorCode.ADMIN_409_TASK_RUNNING: 409,
+    ErrorCode.SYS_400_VALIDATION: 400,
+    ErrorCode.SYS_403_DEBUG_DISABLED: 403,
+    ErrorCode.SYS_404_NOT_FOUND: 404,
+    ErrorCode.SYS_500_INTERNAL: 500,
+    ErrorCode.SYS_503_DEPENDENCY_DOWN: 503,
+    ErrorCode.DEBUG_400_INVALID_SOURCE: 400,
+}
+
+
 def status_of(code: ErrorCode) -> int:
-    """从错误码解析 HTTP 状态码（编码约定 *_NNN_*）。
+    """从错误码解析 HTTP 状态码（显式映射，P1 M-10，避免脆弱字符串解析）。
 
     Args:
         code: 错误码枚举成员。
@@ -68,7 +94,7 @@ def status_of(code: ErrorCode) -> int:
     Returns:
         HTTP 状态码整数。
     """
-    return int(code.value.split("_")[1])
+    return _STATUS_MAP.get(code, int(code.value.split("_")[1]))
 
 
 class ApiError(HTTPException):

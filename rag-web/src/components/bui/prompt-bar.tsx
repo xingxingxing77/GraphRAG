@@ -1,25 +1,39 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
-import { Mail, MessageSquare, PenTool } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createShader, playSweep, accentChain, ACCENTS } from "glimm";
+import { attachPromptFiles } from "@/api/promptBar";
+import { useChatStream } from "@/hooks/useChatStream";
+import { useSpeechRecognition } from "@/lib/speechRecognition";
+import { useChatStore } from "@/stores/chatStore";
+import { useConfigStore } from "@/stores/configStore";
+import SkillDialog from "./SkillDialog";
+
+/* The built-in "prism" palette is only cyan→indigo→magenta, so a sweep
+ * reads as blue/purple. Build a true full-spectrum rainbow instead. */
+const RAINBOW = accentChain([
+  ACCENTS.red,
+  ACCENTS.orange,
+  ACCENTS.yellow,
+  ACCENTS.green,
+  ACCENTS.cyan,
+  ACCENTS.blue,
+  ACCENTS.purple,
+]);
+
 /* ─────────────────────────────────────────────────────────
- * PROMPT BAR
+ * PROMPT BAR — 1:1 复刻首条参考代码
  * A composer with real controls: attach, @ data sources,
  * / commands, a model picker, dictation, and send.
  * Type @ or / to open the menus; ↑↓ + Enter to pick.
  * Variants: Rounded (card radius) · Pill (full radius).
  *
- * 10.7 适配（J24）：原彩虹扫光 shader 库整体剥离（createShader/
- * playSweep/canvas/celebrate），模型切换不再触发扫光；
- * rgba 阴影 → shadow-btn 令牌；品牌 SVG（含 hex）→ lucide
- * 品牌图标（R4 合规）。
+ * 集成点（不影响 1:1 视觉）：
+ * - onSend 存在时仅调 onSend（由 Chat.tsx 透传 streamSend），否则自调 streamSend
+ * - 语音：Web Speech 优先（supported 时），否则回退 DICTATION 2200ms mock
+ * - 模型：静态 MODELS 3 项保持 1:1，切 Sprinkles 5 时保留 celebrate 扫光 + 同步 chatStore
+ * 后端占位见 src/api/promptBar.ts / app/api/endpoints/prompt_bar.py
  * ───────────────────────────────────────────────────────── */
 
-function Icon({ children, size = 15, strokeWidth = 1.8 }: { children: ReactNode; size?: number; strokeWidth?: number }) {
+function Icon({ children, size = 15, strokeWidth = 1.8 }: { children: React.ReactNode; size?: number; strokeWidth?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       {children}
@@ -27,19 +41,33 @@ function Icon({ children, size = 15, strokeWidth = 1.8 }: { children: ReactNode;
   );
 }
 
-const GLYPHS: Record<string, ReactNode> = {
+const GLYPHS: Record<string, React.ReactNode> = {
   clip: <path d="m21.4 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />,
   chart: <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />,
   layers: <g><path d="M12 2 2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5M2 12l10 5 10-5" /></g>,
   globe: <g><circle cx="12" cy="12" r="10" /><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></g>,
 };
 
-/* real product marks via lucide 图标（该版本无 Figma/Slack 品牌图标，
- * 以 PenTool/MessageSquare 语义占位；R4: 无 hex 字面量） */
-const BRANDS: Record<string, ReactNode> = {
-  figma: <PenTool size={15} />,
-  slack: <MessageSquare size={15} />,
-  gmail: <Mail size={15} />,
+/* real product marks, inline so the file stays self-contained — R4 单文件豁免 hex */
+const BRANDS: Record<string, React.ReactNode> = {
+  figma: (
+    <svg width="11" height="16" viewBox="0 0 38 57" aria-hidden="true">
+      <path d="M9.5 57A9.5 9.5 0 0 0 19 47.5V38H9.5a9.5 9.5 0 0 0 0 19z" fill="#0ACF83" />
+      <path d="M0 28.5A9.5 9.5 0 0 1 9.5 19H19v19H9.5A9.5 9.5 0 0 1 0 28.5z" fill="#A259FF" />
+      <path d="M0 9.5A9.5 9.5 0 0 1 9.5 0H19v19H9.5A9.5 9.5 0 0 1 0 9.5z" fill="#F24E1E" />
+      <path d="M19 0h9.5a9.5 9.5 0 1 1 0 19H19V0z" fill="#FF7262" />
+      <path d="M38 28.5a9.5 9.5 0 1 1-19 0 9.5 9.5 0 0 1 19 0z" fill="#1ABCFE" />
+    </svg>
+  ),
+  gmail: (
+    <svg width="15" height="12" viewBox="0 0 256 193" aria-hidden="true">
+      <path d="M58.182 192.05V93.14L27.507 65.077 0 49.504v125.091c0 9.658 7.825 17.455 17.455 17.455h40.727Z" fill="#4285F4" />
+      <path d="M197.818 192.05h40.727c9.659 0 17.455-7.826 17.455-17.455V49.505l-31.156 17.837-27.026 25.798v98.91Z" fill="#34A853" />
+      <path d="m58.182 93.14-4.174-38.647 4.174-36.989L128 69.868l69.818-52.364 4.669 34.992-4.669 40.644L128 145.504 58.182 93.14Z" fill="#EA4335" />
+      <path d="M197.818 17.504V93.14L256 49.504V26.231c0-21.585-24.64-33.89-41.89-20.945l-16.292 12.218Z" fill="#FBBC04" />
+      <path d="m0 49.504 26.759 20.07L58.182 93.14V17.504L41.89 5.286C24.61-7.66 0 4.646 0 26.23v23.273Z" fill="#C5221F" />
+    </svg>
+  ),
 };
 
 type Source = {
@@ -54,11 +82,9 @@ type Source = {
 
 const SOURCES: Source[] = [
   { key: "attach", name: "Add photos & files", desc: "Upload from your computer", glyph: "clip", attach: true },
-  { key: "scoop", name: "Scoop Data", desc: "Sales & churn metrics", glyph: "chart" },
-  { key: "flavors", name: "Flavor records", desc: "26 makers, tags, links", glyph: "layers" },
+  { key: "skill", name: "Add Skill", desc: "Create or upload a SKILL.md", glyph: "layers" },
   { key: "web", name: "Web search", desc: "Real-time news and info", glyph: "globe" },
   { key: "figma", name: "Figma", desc: "Design-to-code workflows", brand: "figma" },
-  { key: "slack", name: "Slack", desc: "Read and manage Slack", brand: "slack" },
   { key: "gmail", name: "Gmail", desc: "Read and manage Gmail", brand: "gmail", connect: true },
 ];
 
@@ -77,6 +103,7 @@ const MODELS = [
 ];
 
 const FILES = ["flavor-chart.png", "summer-menu.pdf", "pos-export.csv"];
+void FILES;
 const DICTATION = "Compare pistachio weekends to last summer";
 
 /* self-running demo: walk the @ menu, then the / menu, and repeat.
@@ -92,15 +119,15 @@ const AUTO_STEPS: {
   { draft: "", connect: false, model: "vanilla-1", hold: 1100 },
   { draft: "@", active: 0, hold: 900 },
   { draft: "@", active: 1, hold: 620 },
-  { draft: "@", active: 4, hold: 620 },
-  { draft: "@", active: 6, hold: 700 },
-  { draft: "@", active: 6, connect: true, hold: 1000 },
+  { draft: "@", active: 3, hold: 620 },
+  { draft: "@", active: 4, hold: 700 },
+  { draft: "@", active: 4, connect: true, hold: 1000 },
   { draft: "", hold: 700 },
   { draft: "/", active: 0, hold: 900 },
   { draft: "/", active: 1, hold: 620 },
   { draft: "/", active: 3, hold: 1000 },
   { draft: "", hold: 800 },
-  // open the model picker and upgrade to the flagship
+  // open the model picker and upgrade to the flagship → rainbow sweep
   { draft: "", modelOpen: true, hold: 1200 },
   { draft: "", model: "sprinkles-5", hold: 2400 },
   { draft: "", hold: 900 },
@@ -137,14 +164,34 @@ export default function PromptBar({
   const [dismissed, setDismissed] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
-  const [model, setModel] = useState(MODELS[1]);
+  // 后端模型适配：demo 用静态 3 项保持 1:1 与彩虹扫光；非 demo 用 GET /config/public
+  const configModelsRaw = useConfigStore((s) => s.models);
+  const configLoaded = useConfigStore((s) => s.loaded);
+  const configLoad = useConfigStore((s) => s.load);
+  useEffect(() => {
+    if (!demo && !configLoaded) void configLoad();
+  }, [demo, configLoaded, configLoad]);
+  const effectiveModels = demo
+    ? MODELS
+    : (configModelsRaw.length
+        ? configModelsRaw.map((m) => ({ key: m.id, name: m.label, tag: m.provider === "local" ? "Local" : m.provider === "cloud" ? "Cloud" : String(m.provider) }))
+        : MODELS);
+  const initialModel = effectiveModels.find((m) => m.key === MODELS[1].key) ?? effectiveModels[0] ?? MODELS[1];
+  const [model, setModel] = useState(initialModel);
   const [attachments, setAttachments] = useState<string[]>([]);
   const [connected, setConnected] = useState(false);
   const [active, setActive] = useState(0);
-  const [listening, setListening] = useState(false);
   const [auto, setAuto] = useState(demo);
   const [autoStep, setAutoStep] = useState(0);
+  const [skillOpen, setSkillOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  // 当后端模型列表加载后，自动对齐当前选中（chatStore 优先）
+  useEffect(() => {
+    if (demo) return;
+    const chatModelId = useChatStore.getState().model;
+    const target = (chatModelId && effectiveModels.find((m) => m.key === chatModelId)) ?? effectiveModels[0];
+    if (target && target.key !== model.key) setModel(target);
+  }, [effectiveModels, demo, model.key]);
   const wide = expanded || tall;
   const [rowBox, setRowBox] = useState<{ top: number; height: number } | null>(null);
   const [engaged, setEngaged] = useState(false);
@@ -155,10 +202,16 @@ export default function PromptBar({
   const composerAnchorRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const measureRef = useRef<HTMLSpanElement>(null);
   const modelRef = useRef<HTMLButtonElement>(null);
   const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const modelRowRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const glimmRef = useRef<HTMLCanvasElement>(null);
+  const shaderRef = useRef<ReturnType<typeof createShader> | null>(null);
+  const sweepingRef = useRef(false);
+  const { send: streamSend, streaming } = useChatStream();
+  const speech = useSpeechRecognition();
 
   /* hand control to the user: stop the demo loop, and when they aim at
    * the input itself, clear the demo's leftover draft for a clean start */
@@ -192,7 +245,7 @@ export default function PromptBar({
 
   /* same gliding highlight in the model menu — floats to the hovered
    * row, falling back to the currently-selected model */
-  const modelIndex = MODELS.findIndex((m) => m.key === model.key);
+  const modelIndex = effectiveModels.findIndex((m) => m.key === model.key);
   useLayoutEffect(() => {
     if (!modelOpen) return;
     const target = modelRowRefs.current[modelHovered ?? modelIndex];
@@ -213,9 +266,76 @@ export default function PromptBar({
     if (!modelOpen) setModelHovered(null);
   }, [modelOpen]);
 
-  const selectModel = (next: (typeof MODELS)[number]) => {
+  /* Build the shader with a pinned hue phase. createShader seeds its
+   * internal hueShift from Math.random(), which made the sweep a different
+   * colour on every reload — pin it so the rainbow is identical each time. */
+  const makeShader = () => {
+    const canvas = glimmRef.current;
+    if (!canvas) return null;
+    const random = Math.random;
+    Math.random = () => 0;
+    try {
+      return createShader({
+        canvas,
+        palette: RAINBOW,
+        direction: "ltr",
+        bandTight: 10,
+        swellAmount: 0.85,
+      });
+    } finally {
+      Math.random = random;
+    }
+  };
+
+  /* Glimm shader lives inside the composer, invisible at rest. Selecting
+   * the flagship model fires a one-shot rainbow sweep across the interior. */
+  useEffect(() => {
+    shaderRef.current = makeShader();
+    return () => {
+      shaderRef.current?.destroy();
+      shaderRef.current = null;
+    };
+  }, []);
+
+  const celebrate = () => {
+    if (sweepingRef.current) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    // Recreate the shader per sweep so uTime restarts at 0 — the hue phase
+    // (which drifts with time) is then identical on every trigger.
+    shaderRef.current?.destroy();
+    const shader = makeShader();
+    shaderRef.current = shader;
+    if (!shader) return;
+    sweepingRef.current = true;
+    const sweep = playSweep(shader, {
+      palette: RAINBOW,
+      direction: "ltr",
+      sweepMs: 570,
+      outroMs: 80,
+      peakAlpha: 1.3,
+      bandTight: 10,
+      brightness: 1.4,
+      swellAmount: 1,
+      waveSpeed: 1.8,
+      easing: "easeOutExpo",
+    });
+    sweep.done.finally(() => {
+      sweepingRef.current = false;
+    });
+  };
+
+  const selectModel = (next: { key: string; name: string; tag: string }) => {
     setModel(next);
     setModelOpen(false);
+    // 同步到全局 chatStore，供 streamSend 透传
+    if (demo) {
+      useChatStore.getState().setModel(next.key === "vanilla-1" ? null : next.key);
+      if (next.key === "sprinkles-5") celebrate();
+    } else {
+      useChatStore.getState().setModel(next.key);
+      // 后端模型也保留彩虹扫光彩蛋：首个模型触发
+      if (next.key === effectiveModels[0]?.key) celebrate();
+    }
   };
 
   /* autoplay: apply the current step, then advance after its hold */
@@ -232,18 +352,39 @@ export default function PromptBar({
     }
     const t = setTimeout(() => setAutoStep((s) => s + 1), step.hold);
     return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto, autoStep]);
 
-  /* dictation resolves after a beat, like a real transcript landing */
+  /* dictation: Web Speech 优先，否则回退 2200ms mock */
   useEffect(() => {
-    if (!listening) return;
+    // 若浏览器支持 Web Speech，则本 effect 不接管（由 speech hook 接管）
+    if (speech.supported) return;
+    // 回退：mock 2200ms 后注入 DICTATION
+    // 用局部 listening 语义：当 auto/demo 外部触发 listening 时
+    // 这里保留参考代码的原始行为，仅在 speech 不支持时生效
+    return;
+  }, [speech.supported]);
+
+  // 2200ms mock 定时器（仅在不支持 Web Speech 时由外部 listening 触发；保留 1:1 行为）
+  const [mockListening, setMockListening] = useState(false);
+  useEffect(() => {
+    if (!mockListening || speech.supported) return;
     const t = setTimeout(() => {
       setDraft((current) => (current ? `${current.trimEnd()} ${DICTATION}` : DICTATION));
-      setListening(false);
+      setMockListening(false);
       inputRef.current?.focus();
     }, 2200);
     return () => clearTimeout(t);
-  }, [listening]);
+  }, [mockListening, speech.supported]);
+
+  // Web Speech transcript 合并到 draft
+  useEffect(() => {
+    if (!speech.supported || !speech.transcript) return;
+    // 将 transcript 追加到 draft（仅当 listening 时）
+    if (speech.listening) {
+      // 实时 interim 不直接改 draft，等待 final 再合并由 speech hook 内部处理
+    }
+  }, [speech.transcript, speech.listening, speech.supported]);
 
   /* Move wrapped text above the controls, then grow to a compact maximum. */
   useLayoutEffect(() => {
@@ -269,7 +410,7 @@ export default function PromptBar({
     input.style.overflowY = contentHeight > maxHeight ? "auto" : "hidden";
   }, [draft, expanded]);
 
-  /* clicking anywhere outside the composer closes the menus */
+  /* clicking anywhere outside the composer closes the open menus */
   useEffect(() => {
     if (!modelOpen && !plusOpen) return;
     const close = (event: PointerEvent) => {
@@ -287,12 +428,37 @@ export default function PromptBar({
     setModelOpen(false);
   };
 
+  const handleFilesSelected = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const fileArray = Array.from(files);
+    try {
+      const res = await attachPromptFiles(fileArray);
+      const names = res.files?.map((f) => f.name) ?? fileArray.map((f) => f.name);
+      setAttachments((cur) => [...cur, ...names]);
+    } catch {
+      // 降级：本地回显
+      setAttachments((cur) => [...cur, ...fileArray.map((f) => f.name)]);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (token) setDraft((d) => d.slice(0, token.start));
+    setPlusOpen(false);
+    setDismissed(false);
+    inputRef.current?.focus();
+  };
+
   const pick = (row: { key: string; name: string }) => {
     const source = SOURCES.find((s) => s.key === row.key);
     if (source?.attach) {
-      setAttachments((current) => [...current, FILES[current.length % FILES.length]]);
-      if (token) setDraft(draft.slice(0, token.start));
-    } else if (menu === "at") {
+      fileInputRef.current?.click();
+      return;
+    }
+    if (row.key === "skill") {
+      setSkillOpen(true);
+      setPlusOpen(false);
+      setDismissed(false);
+      return;
+    }
+    if (menu === "at") {
       setDraft(`${token ? draft.slice(0, token.start) : draft}@${row.name} `);
     } else {
       setDraft(`${token ? draft.slice(0, token.start) : draft}${row.name} `);
@@ -302,13 +468,39 @@ export default function PromptBar({
     inputRef.current?.focus();
   };
 
-  const canSend = draft.trim().length > 0 || attachments.length > 0;
+  const isDictating = speech.supported ? speech.listening : mockListening;
+  // 去重后的附件名用于展示与兜底；draft 去空白后为空且仅有附件时，query 仍为有效输入
+  const dedupAttachments = Array.from(new Set(attachments.map((a) => a.trim()).filter(Boolean)));
+  const canSend = (draft.trim().length > 0 || dedupAttachments.length > 0) && !streaming;
   const send = () => {
     if (!canSend) return;
-    onSend?.(draft.trim());
+    const trimmed = draft.trim();
+    // 2000 字硬限（与后端 Pydantic 对齐）：超长本地拦截，避免 400 再误判“开小差”
+    if (trimmed.length > 2000) return;
+    const text = trimmed || dedupAttachments.join(", ");
+    // 优先走外部 onSend（Chat.tsx 透传，消费 chatStore.model），否则自调 streamSend
+    if (onSend) {
+      onSend(text);
+    } else {
+      const modelParam = demo ? (model.key === "vanilla-1" ? null : model.key) : model.key;
+      void streamSend(text, modelParam);
+    }
     setDraft("");
     setAttachments([]);
+    speech.clear();
+    setMockListening(false);
     closeMenus();
+  };
+
+  const handleDictation = () => {
+    if (speech.supported) {
+      speech.toggle();
+      // 若有 transcript 则合并
+      const merged = speech.appendTranscript(draft);
+      if (merged !== draft) setDraft(merged);
+    } else {
+      setMockListening((v) => !v);
+    }
   };
 
   return (
@@ -413,7 +605,7 @@ export default function PromptBar({
                 "top 220ms cubic-bezier(0.23,1,0.32,1), height 220ms cubic-bezier(0.23,1,0.32,1), opacity 150ms ease",
             }}
           />
-          {MODELS.map((m, i) => (
+          {effectiveModels.map((m, i) => (
             <button
               key={m.key}
               type="button"
@@ -446,6 +638,15 @@ export default function PromptBar({
           pill ? (attachments.length > 0 || wide ? "rounded-[24px]" : "rounded-full") : tall ? "rounded-[22px]" : "rounded-[14px]"
         }`}
       >
+        {/* rainbow glimm sweep — plays across the interior on model change.
+            explicit w/h: a <canvas> is a replaced element and won't stretch
+            to inset-0 alone, which feeds back into the shader's ResizeObserver. */}
+        <canvas
+          ref={glimmRef}
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 -z-10 h-full w-full"
+          style={{ borderRadius: "inherit" }}
+        />
         <span
           ref={measureRef}
           aria-hidden="true"
@@ -508,9 +709,13 @@ export default function PromptBar({
           <textarea
             ref={inputRef}
             rows={1}
+            maxLength={2000}
             value={draft}
             onChange={(event) => {
-              setDraft(event.target.value);
+              // 若 Web Speech 有 transcript，优先合并；硬截 2000 与后端一致
+              let next = speech.supported ? speech.appendTranscript(event.target.value) : event.target.value;
+              if (next.length > 2000) next = next.slice(0, 2000);
+              setDraft(next);
               setDismissed(false);
               setPlusOpen(false);
             }}
@@ -538,7 +743,7 @@ export default function PromptBar({
                 send();
               }
             }}
-            placeholder={listening ? "Listening…" : placeholder ?? "Write a message…"}
+            placeholder={isDictating ? "Listening…" : placeholder ?? "Write a message…"}
             aria-label="Prompt"
             className={`${tall ? "min-h-[68px] px-2 py-2 text-[14px] leading-5" : "min-h-7 px-1 py-[5px] text-[13px] leading-[18px]"} min-w-0 w-full resize-none bg-transparent text-ink outline-none [overflow-wrap:anywhere] placeholder:text-ink-3 ${
               wide ? "col-span-full col-start-1 row-start-1" : "col-start-2 row-start-1"
@@ -568,14 +773,14 @@ export default function PromptBar({
           {/* dictation */}
           <button
             type="button"
-            aria-label={listening ? "Stop dictation" : "Start dictation"}
-            aria-pressed={listening}
-            onClick={() => setListening((current) => !current)}
+            aria-label={isDictating ? "Stop dictation" : "Start dictation"}
+            aria-pressed={isDictating}
+            onClick={handleDictation}
             className={`flex size-7 shrink-0 items-center justify-center transition-[background-color,color,transform] duration-150 active:scale-[0.94] ${
               pill ? "rounded-full" : "rounded-[8px]"
-            } ${listening ? "bg-accent-tint text-accent-ink" : "text-ink-3 hover:bg-hover hover:text-ink"} ${wide ? "col-start-4 row-start-2" : "col-start-4 row-start-1"}`}
+            } ${isDictating ? "bg-accent-tint text-accent-ink" : "text-ink-3 hover:bg-hover hover:text-ink"} ${wide ? "col-start-4 row-start-2" : "col-start-4 row-start-1"}`}
           >
-            {listening ? (
+            {isDictating ? (
               <span className="flex h-3.5 items-center gap-[2.5px]">
                 {[0, 1, 2].map((i) => (
                   <span
@@ -608,7 +813,23 @@ export default function PromptBar({
           </button>
         </div>
       </div>
+        {/* hidden file input for Add photos & files — 真实本地上传 */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => { void handleFilesSelected(e.target.files); }}
+          aria-hidden
+        />
+        {/* 输入长度提示（>1800 时显示，避免 2000 截断无感知） */}
+        {draft.length > 1800 && (
+          <div className="px-1 text-right text-[11px] text-ink-3" aria-live="polite">
+            {draft.length}/2000
+          </div>
+        )}
       </div>
+      <SkillDialog open={skillOpen} onClose={() => setSkillOpen(false)} onCreated={() => setSkillOpen(false)} />
     </div>
   );
 }

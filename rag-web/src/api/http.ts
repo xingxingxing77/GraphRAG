@@ -12,7 +12,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { useChatStore } from "@/stores/chatStore";
 
 export const http = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE,
+  baseURL: import.meta.env.VITE_API_BASE ?? "",
   timeout: 10_000,
 });
 
@@ -25,18 +25,32 @@ http.interceptors.request.use((cfg) => {
 let relogining = false;
 http.interceptors.response.use(
   (res) => {
-    const deg = res.headers["x-degraded"] as string | undefined;
+    // P0-07: 大小写兼容 + 根实例也采集
+    const rawHeaders = res.headers as Record<string, unknown>;
+    const deg =
+      (rawHeaders["x-degraded"] as string | undefined) ??
+      (rawHeaders["X-Degraded"] as string | undefined);
     if (deg) useChatStore.getState().pushDegraded(deg.split(","));
     return res;
   },
   async (err) => {
-    if (axios.isAxiosError(err) && err.response?.status === 401 && !relogining) {
-      relogining = true;
+    if (!axios.isAxiosError(err) || err.response?.status !== 401) return Promise.reject(err);
+    const cfg = err.config as (typeof err.config & { _retry?: boolean }) | undefined;
+    if (!cfg || cfg._retry) return Promise.reject(err);
+    if (relogining) return Promise.reject(err);
+    relogining = true;
+    try {
       const ok = await useAuthStore.getState().relogin();
-      relogining = false;
-      if (ok && err.config) return http(err.config);
+      if (ok && cfg) {
+        cfg._retry = true;
+        const fresh = useAuthStore.getState().token;
+        if (fresh) (cfg.headers as Record<string, string>).Authorization = `Bearer ${fresh}`;
+        return http(cfg);
+      }
       useAuthStore.getState().logout();
       window.location.href = "/login";
+    } finally {
+      relogining = false;
     }
     return Promise.reject(err);
   },

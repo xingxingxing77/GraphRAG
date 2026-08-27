@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Response
 
 # --- 本地模块 ---
 from app.api.deps import get_semantic_cache
+from app.api.errors import ApiError, ErrorCode
 from app.core.models import LatencyTier, PrecheckRequest, PrecheckResponse, SuggestedRun
 from app.memory.semantic_cache import SemanticCache
 
@@ -54,9 +55,27 @@ async def chat_precheck(
 
     Returns:
         PrecheckResponse: 命中/未命中两态。
+
+    Raises:
+        ApiError: CHAT_400_EMPTY_QUERY（query 去空白后为空，02 §6）。
     """
-    lookup = await cache.get_l1(request.query)
+    # 空白输入显式拦截：Pydantic 仅拦 ""，而 "   " 会穿透导致语义检索空向量/误判“开小差”
+    if not request.query.strip():
+        raise ApiError(ErrorCode.CHAT_400_EMPTY_QUERY, "query 不能为空")
+    lookup = await cache.get_l1(request.query.strip())
     if lookup.degraded:
+        stage = getattr(lookup, "degraded_stage", None) or "unknown"
+        logger.warning(
+            "precheck no-cache 降级（stage=%s query=%.30s）: 已按 miss 处理，主链路不受影响",
+            stage,
+            request.query,
+        )
+        try:
+            from app.api.metrics import record_degraded
+
+            record_degraded("no-cache")
+        except Exception:
+            pass
         response.headers["X-Degraded"] = "no-cache"
     if lookup.hit:
         return PrecheckResponse(
@@ -66,4 +85,4 @@ async def chat_precheck(
             cache_score=lookup.cache_score,
             matched_query=lookup.matched_query,
         )
-    return PrecheckResponse(hit=False, suggested_run=SuggestedRun(latency_tier=_suggest_tier(request.query)))
+    return PrecheckResponse(hit=False, suggested_run=SuggestedRun(latency_tier=_suggest_tier(request.query.strip())))

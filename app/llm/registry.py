@@ -24,8 +24,14 @@ from app.llm.client import ChatCompletion, LLMClient, ModelEntry
 
 logger = logging.getLogger(__name__)
 
-# 默认注册表文件（基于本文件定位仓库根，不依赖运行时工作目录）
-_DEFAULT_MODELS_YAML = Path(__file__).resolve().parents[2] / "config" / "models.yaml"
+# 默认注册表文件（基于本文件定位仓库根，不依赖运行时工作目录）— 用 abspath 避免 Path.resolve 阻塞
+_DEFAULT_MODELS_YAML = Path(
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "config",
+        "models.yaml",
+    )
+)
 
 
 class LLMUnavailable(Exception):

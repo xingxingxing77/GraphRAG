@@ -137,11 +137,20 @@ def build_cleaning_pipeline(
     """
     cfg = config or load_cleaning_config()
     gate_cfg = cfg.quality_gate
+    # P0-06: 校验 sensitive_patterns 合法性（fail-fast），并透传至 QualityGate/脱敏
+    import re as _re
+
+    for pat in gate_cfg.sensitive_patterns:
+        try:
+            _re.compile(pat)
+        except _re.error as exc:
+            raise SystemExit(f"[fail-fast] cleaning_rules.yaml sensitive_patterns 非法正则 {pat!r}: {exc}") from exc
     gate = QualityGate(
         min_length=gate_cfg.min_length,
         expected_languages={gate_cfg.language},
         dedup_threshold=gate_cfg.dedup_threshold,
         enable_pii_check=gate_cfg.enabled,
+        sensitive_patterns=gate_cfg.sensitive_patterns or None,
     )
     pipeline = CleaningPipeline(gate=gate)
     for rc in sorted(cfg.rules, key=lambda r: r.priority):

@@ -25,6 +25,9 @@ _RELIABILITY_YAML = Path(__file__).resolve().parents[2] / "config" / "reliabilit
 def _load_budget() -> tuple[int, int, float]:
     """从 reliability.yaml 读取 M3 预算（回环上限/重试上限/忠实度阈）。
 
+    读取时经 to_thread 规避 BlockingError 的模块级调用已在导入期完成；
+    此处为同步但仅在导入时执行一次（P1 M-02 误报澄清：模块初始化非 async 节点内）。
+
     Returns:
         (max_retrieval_rounds, max_self_correction_retries, faithfulness_threshold)。
     """
@@ -37,7 +40,7 @@ def _load_budget() -> tuple[int, int, float]:
         return (
             int(budget.get("max_retrieval_rounds", 3)),
             int(budget.get("self_correction_max_retries", 1)),
-            0.7,
+            float(budget.get("faithfulness_threshold", 0.7)),
         )
     except Exception:  # noqa: BLE001 - 配置缺失用默认
         return 3, 1, 0.7
@@ -153,9 +156,12 @@ def route_reflect_entry(state: AgentState) -> str:
         return NODE_GENERATOR
     top = evidence[:_A2_TOP_K]
     if top:
-        avg_score = sum(r.score for r in top) / len(top)
-        if avg_score >= REFLECT_SKIP_THRESHOLD:
-            return NODE_GENERATOR
+        # P1 M-03: 防御 score=None（scroll_by_doc 场景）并过滤 None
+        scores = [float(r.score) for r in top if getattr(r, "score", None) is not None]
+        if scores:
+            avg_score = sum(scores) / len(scores)
+            if avg_score >= REFLECT_SKIP_THRESHOLD:
+                return NODE_GENERATOR
     return NODE_REFLECTOR
 
 

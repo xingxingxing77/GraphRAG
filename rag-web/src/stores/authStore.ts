@@ -9,6 +9,15 @@ import { issueToken } from "@/api/auth";
 import { bindJwt } from "@/lib/agentClient";
 import type { AuthTokenRequest, UserInfo } from "@/types";
 
+function loadGrant(): AuthTokenRequest | null {
+  try {
+    const raw = sessionStorage.getItem("rag_lastGrant");
+    return raw ? (JSON.parse(raw) as AuthTokenRequest) : null;
+  } catch {
+    return null;
+  }
+}
+
 interface AuthState {
   token: string | null;
   user: UserInfo | null;
@@ -22,12 +31,13 @@ interface AuthState {
 export const useAuthStore = create<AuthState>()((set, get) => ({
   token: sessionStorage.getItem("rag_token"),
   user: JSON.parse(sessionStorage.getItem("rag_user") ?? "null") as UserInfo | null,
-  lastGrant: null,
+  lastGrant: loadGrant(),
 
   async login(grant) {
     const resp = await issueToken(grant);
     sessionStorage.setItem("rag_token", resp.access_token);
     sessionStorage.setItem("rag_user", JSON.stringify(resp.user));
+    sessionStorage.setItem("rag_lastGrant", JSON.stringify(grant));
     bindJwt(resp.access_token); // SDK 直连同源 JWT（J19，06 §5）
     set({ token: resp.access_token, user: resp.user, lastGrant: grant });
   },
@@ -46,7 +56,8 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   logout() {
     sessionStorage.removeItem("rag_token");
     sessionStorage.removeItem("rag_user");
-    set({ token: null, user: null });
+    sessionStorage.removeItem("rag_lastGrant");
+    set({ token: null, user: null, lastGrant: null });
   },
 }));
 

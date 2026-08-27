@@ -21,6 +21,8 @@ from fastapi import APIRouter, Depends, Response
 from fastapi.responses import JSONResponse
 
 # --- 本地模块 ---
+import logging
+
 from app.api.deps import (
     get_es_client,
     get_neo4j_client,
@@ -34,6 +36,8 @@ from app.db.es_client import ESClient
 from app.db.neo4j_client import Neo4jClient
 from app.db.qdrant_client import QdrantDBClient
 from app.db.redis_client import RedisClient
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -149,6 +153,7 @@ async def readiness_check(
             components[name] = HealthComponent(status="up", latency_ms=latency)
         elif name in _CRITICAL_COMPONENTS:
             components[name] = HealthComponent(status="down", latency_ms=latency)
+            logger.warning("健康探针 critical down: %s latency=%sms", name, latency)
         else:
             # non-critical：降级不阻断（D5/J23）
             components[name] = HealthComponent(
@@ -156,8 +161,23 @@ async def readiness_check(
             )
             if name == "redis":
                 degraded_reasons.extend(["no-cache", "no-memory"])
+                logger.warning("健康探针 redis degraded → X-Degraded: no-cache,no-memory（L2/工作记忆不可用，precheck 将按 miss）")
+                try:
+                    from app.api.metrics import record_degraded
+
+                    record_degraded("no-cache")
+                    record_degraded("no-memory")
+                except Exception:
+                    pass
             elif name == "postgres":
                 degraded_reasons.append("no-persistence")
+                logger.warning("健康探针 postgres degraded → X-Degraded: no-persistence")
+                try:
+                    from app.api.metrics import record_degraded
+
+                    record_degraded("no-persistence")
+                except Exception:
+                    pass
 
     critical_down = any(
         components[c].status == "down" for c in _CRITICAL_COMPONENTS

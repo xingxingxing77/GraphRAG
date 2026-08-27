@@ -6,6 +6,7 @@ config/pipeline_config.yaml 经 pydantic 校验加载，失败即拒绝启动。
 """
 
 # --- 标准库 ---
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -13,8 +14,20 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, Field
 
-_DEFAULT_PIPELINE_YAML = Path(__file__).resolve().parents[2] / "config" / "pipeline_config.yaml"
-_DEFAULT_CLEANING_YAML = Path(__file__).resolve().parents[2] / "config" / "cleaning_rules.yaml"
+_DEFAULT_PIPELINE_YAML = Path(
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "config",
+        "pipeline_config.yaml",
+    )
+)
+_DEFAULT_CLEANING_YAML = Path(
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "config",
+        "cleaning_rules.yaml",
+    )
+)
 
 
 class IngestionSourceConfig(BaseModel):
@@ -153,6 +166,8 @@ def load_pipeline_config(path: Path = _DEFAULT_PIPELINE_YAML) -> PipelineConfig:
         raise SystemExit(f"[fail-fast] 管道配置缺失: {path}")
     with path.open(encoding="utf-8") as f:
         raw = yaml.safe_load(f)
+    if raw is None:
+        raise SystemExit(f"[fail-fast] 管道配置为空: {path}")
     try:
         return PipelineConfig.model_validate(raw)
     except Exception as exc:
@@ -228,6 +243,8 @@ def load_cleaning_config(path: Path = _DEFAULT_CLEANING_YAML) -> CleaningPipelin
         raise SystemExit(f"[fail-fast] 清洗规则配置缺失: {path}")
     with path.open(encoding="utf-8") as f:
         raw = yaml.safe_load(f)
+    if raw is None:
+        raise SystemExit(f"[fail-fast] cleaning_rules.yaml 为空: {path}")
     section = (raw or {}).get("cleaning_pipeline", {})
     try:
         return CleaningPipelineConfig.model_validate(section)
