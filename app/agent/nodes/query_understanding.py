@@ -28,29 +28,40 @@ async def query_understanding_node(state: AgentState) -> dict[str, Any]:
         state: 当前 Agent 状态（读取 original_query/latency_tier 入参）。
 
     Returns:
-        状态增量：query（改写后）/ intent / latency_tier（具体档位）。
+        状态增量：query（改写后）/ intent / latency_tier（具体档位）/
+        sub_queries（子问题分解）。
     """
     raw_query = state.get("query") or state.get("original_query", "")
-    query = raw_query.strip()
+    history_context = str(state.get("history_context") or "")
+    # m7：chitchat 规则与改写作用于「纯本轮问题」；load_memory 注入的
+    # 上下文经 history_context 参数单独传入，不再混入判定文本
+    pure_query = str(state.get("original_query") or "").strip()
+    if not pure_query and history_context and str(raw_query).startswith(history_context):
+        pure_query = str(raw_query)[len(history_context):].strip()
+    if not pure_query:
+        pure_query = str(raw_query).strip()
     requested_tier = str(state.get("latency_tier") or "auto")
 
     # 空输入守卫：空白查询直接按 chitchat/fast 短路，避免进入 LLM 导致无意义错误冒泡为 500
-    if not query:
+    if not pure_query:
         logger.info("query_understanding 空输入守卫命中（fast/chitchat 短路）")
         return {
             "query": "",
             "intent": IntentType.CHITCHAT,
             "latency_tier": resolve_latency_tier(IntentType.CHITCHAT, requested_tier),
+            "sub_queries": [],
         }
 
-    # query 已含 load_memory 注入上下文（注入在改写前，04 §4/J17）
-    result = await understand_query(query)
+    # 上下文走 history_context 通道（04 §4/J17：注入在改写前）
+    result = await understand_query(pure_query, history_context=history_context)
     tier = resolve_latency_tier(result.intent, requested_tier)
 
     updates: dict[str, Any] = {
-        "query": result.rewritten_query or query,
+        "query": result.rewritten_query or pure_query,
         "intent": result.intent,
         "latency_tier": tier,
+        # m8：M2 合并产出的子问题分解透传给 Planner 消费
+        "sub_queries": list(result.subqueries or []),
     }
     if result.rule_short_circuit:
         logger.info("query_understanding 规则短路命中（零 LLM 调用）")

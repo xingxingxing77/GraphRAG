@@ -61,14 +61,31 @@ class TestLoadMemoryNode:
             return stack.injected
 
         stack.scheduler.build_context = fake_build  # type: ignore[method-assign]
+        # C1：真实 run 入参只带 original_query（不传 query）
         result = await lm.load_memory_node(
-            {"query": "火候几分熟", "session_id": "s1", "user_id": "u1"}
+            {"original_query": "火候几分熟", "session_id": "s1", "user_id": "u1"}
         )
         assert result["query"].startswith("[历史1轮]")
         assert result["query"].endswith("火候几分熟")
+        assert result["history_context"] == "[历史1轮]\nQ: 鲈鱼怎么蒸\nA: 蒸8分钟"
 
-    async def test_empty_memory_returns_no_change(self, stack: _FakeStack) -> None:
-        assert await lm.load_memory_node({"query": "q", "session_id": "s"}) == {}
+    async def test_no_memory_writes_back_original_query(
+        self, stack: _FakeStack
+    ) -> None:
+        """C1：无记忆也写回 query=original_query，冲掉 checkpoint 残留。"""
+        result = await lm.load_memory_node(
+            {
+                "query": "上一轮的旧改写查询",
+                "original_query": "q",
+                "session_id": "s",
+            }
+        )
+        assert result["query"] == "q"
+        assert result["history_context"] == ""
+        # run 级字段每 run 清零（防上一轮终态经 checkpoint 泄漏）
+        assert result["answer"] == ""
+        assert result["correction_hint"] == ""
+        assert result["self_correction_retries"] == 0
 
     async def test_failure_degrades_to_passthrough(
         self, stack: _FakeStack, monkeypatch: pytest.MonkeyPatch
@@ -155,6 +172,30 @@ class TestWriteBackNode:
             for rec in stack.qdrant.points["rag_cache"].values()
         ]
         assert any(p["matched_doc_ids"] == ["doc-9"] for p in payloads)
+
+    async def test_matched_doc_ids_reads_top_level_doc_id(
+        self, stack: _FakeStack
+    ) -> None:
+        """M5：fulltext 路的 doc_id 在顶层字段而非 metadata。"""
+        evidence = [{"doc_id": "doc-ft", "metadata": {"entity_id": "e1"}}]
+        await wb.write_back_node(
+            {
+                "answer": "a",
+                "original_query": "q",
+                "session_id": "s-ft",
+                "user_id": "u1",
+                "degraded": False,
+                "citations": [],
+                "retrieved_evidence": evidence,
+                "latency_tier": "standard",
+                "token_usage": [],
+            }
+        )
+        payloads = [
+            rec["payload"]
+            for rec in stack.qdrant.points["rag_cache"].values()
+        ]
+        assert any(p["matched_doc_ids"] == ["doc-ft"] for p in payloads)
 
 
 class TestGraphTopology:

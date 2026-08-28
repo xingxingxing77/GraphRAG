@@ -15,6 +15,8 @@ import logging
 from typing import Any
 
 # --- 本地模块 ---
+from app.agent.nodes.generator import order_evidence_e1
+from app.agent.routers import FAITHFULNESS_THRESHOLD
 from app.agent.state import AgentState
 from app.llm.registry import get_registry
 
@@ -41,29 +43,35 @@ def _get_llm() -> Any:
     return get_registry().for_role("judge")
 
 
-def _parse_score(content: str) -> float | None:
-    """解析 judge JSON 输出为分数。
+def _parse_judge(content: str) -> tuple[float | None, str]:
+    """解析 judge JSON 输出为 (分数, 理由)。
 
     Args:
-        content: LLM 输出文本（期望 {"score": ...}）。
+        content: LLM 输出文本（期望 {"score": ..., "reason": ...}）。
 
     Returns:
-        分数（0-1）；解析失败返回 None。
+        (分数 0-1 或 None, 评审理由文本，可能为空)。
     """
     try:
         data = json.loads(content)
     except (json.JSONDecodeError, TypeError):
-        return None
+        return None, ""
     if not isinstance(data, dict):
-        return None
+        return None, ""
     raw_score = data.get("score")
     if raw_score is None:
-        return None
+        return None, ""
     try:
         score = float(raw_score)
     except (TypeError, ValueError):
-        return None
-    return max(0.0, min(1.0, score))
+        return None, ""
+    reason = str(data.get("reason") or "").strip()
+    return max(0.0, min(1.0, score)), reason
+
+
+def _parse_score(content: str) -> float | None:
+    """兼容入口：仅取分数（M3 起推荐用 _parse_judge 同取理由）。"""
+    return _parse_judge(content)[0]
 
 
 async def self_correction_node(state: AgentState) -> dict[str, Any]:
@@ -73,24 +81,30 @@ async def self_correction_node(state: AgentState) -> dict[str, Any]:
         state: 当前 Agent 状态。
 
     Returns:
-        状态增量：faithfulness_score（校验失败/预算耗尽时放行 1.0）。
+        状态增量：faithfulness_score + correction_hint（低分时带失败
+        原因供 Generator 重生成；放行路径 hint 恒空串）。
     """
     # B4：预算耗尽直放行（降级作答由 Generator 承担）
     if state.get("token_budget_exhausted"):
-        return {"faithfulness_score": 1.0}
+        return {"faithfulness_score": 1.0, "correction_hint": ""}
 
     answer = state.get("answer") or ""
-    evidence = (state.get("retrieved_evidence") or [])[:_MAX_EVIDENCE_FOR_JUDGE]
+    # m6：与 Generator 同一 E1 序送评，答案中的 [n] 与证据块编号对齐
+    evidence = order_evidence_e1(list(state.get("retrieved_evidence") or []))[
+        :_MAX_EVIDENCE_FOR_JUDGE
+    ]
 
     # 无答案或无证据可校验：放行
     if not answer or not evidence:
-        return {"faithfulness_score": 1.0}
+        return {"faithfulness_score": 1.0, "correction_hint": ""}
 
     evidence_block = "\n".join(
         f"[{i + 1}] {r.content[:200]}" for i, r in enumerate(evidence)
     )
     user_prompt = f"参考资料：\n{evidence_block}\n\n答案：{answer}"
 
+    score: float | None
+    reason = ""
     try:
         llm = _get_llm()
         resp = await llm.chat(
@@ -100,14 +114,22 @@ async def self_correction_node(state: AgentState) -> dict[str, Any]:
             ],
             response_format={"type": "json_object"},
         )
-        score = _parse_score(resp.content)
+        score, reason = _parse_judge(resp.content)
     except Exception as exc:  # noqa: BLE001 - judge 不可用放行，不阻塞交付
         logger.warning("忠实度校验 LLM 失败，放行: %s", exc)
         score = None
 
     if score is None:
         # 解析/调用失败：放行（D5 不阻塞交付）
-        return {"faithfulness_score": 1.0}
+        return {"faithfulness_score": 1.0, "correction_hint": ""}
 
-    # 重试计数由 Generator 重生成入口递增（路由保持纯函数）
-    return {"faithfulness_score": score}
+    if score < FAITHFULNESS_THRESHOLD:
+        # M3：注入失败原因供 Generator 重生成（契约见本模块头注释），
+        # 否则重生成与首轮同 prompt 原样重放，重试无质量改进通路
+        hint = f"忠实度评分仅 {score:.2f}"
+        if reason:
+            hint += f"，评审理由：{reason}"
+        return {"faithfulness_score": score, "correction_hint": hint}
+
+    # 达标放行并清 hint，防 checkpoint 残留泄漏到后续轮次
+    return {"faithfulness_score": score, "correction_hint": ""}

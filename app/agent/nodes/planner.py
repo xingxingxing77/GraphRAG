@@ -138,6 +138,27 @@ async def planner_node(state: AgentState) -> dict[str, Any]:
             "reflect_feedback": None,
         }
 
+    # 首轮子问题分解（m8 接线）：M2 合并调用已产出 subqueries，
+    # 直接作为检索步骤（省一次规划 LLM 调用，步骤数有界）
+    sub_queries = [
+        str(q).strip()
+        for q in (state.get("sub_queries") or [])
+        if str(q).strip()
+    ][:_MAX_PLAN_STEPS]
+    if sub_queries:
+        if intent_value == IntentType.GLOBAL_SUMMARY.value:
+            steps = [PlanStep(step_id="step-1", tool="global", query=query)]
+            steps.extend(
+                PlanStep(step_id=f"step-{len(steps) + 1}", tool="dense", query=sq)
+                for sq in sub_queries[: _MAX_PLAN_STEPS - 1]
+            )
+        else:
+            steps = [
+                PlanStep(step_id=f"step-{i + 1}", tool="dense", query=sq)
+                for i, sq in enumerate(sub_queries)
+            ]
+        return {"plan": steps, "current_step": 0}
+
     # 首轮：LLM JSON 计划生成（失败回退单步 dense）
     updates: dict[str, Any] = {"current_step": 0}
     try:

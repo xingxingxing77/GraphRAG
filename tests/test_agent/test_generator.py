@@ -45,9 +45,14 @@ class FakeRegistry:
         """
         self.content = content
         self.raise_exc = raise_exc
+        self.fallback_called = 0
+        self.model_called: list[str] = []
+        self.last_messages: list[dict[str, str]] = []
 
     async def chat_with_fallback(self, messages: list[dict[str, str]], **kwargs: Any) -> Any:
         """模拟 fallback 链调用。"""
+        self.fallback_called += 1
+        self.last_messages = messages
         if self.raise_exc:
             raise RuntimeError("all fallback failed")
 
@@ -56,6 +61,25 @@ class FakeRegistry:
             usage = None
 
         return _Resp()
+
+    async def chat(self, messages: list[dict[str, str]], **kwargs: Any) -> Any:
+        """J2：请求级覆盖模型的 chat（替身自身经 for_model 返回）。"""
+        self.last_messages = messages
+        if self.raise_exc:
+            raise RuntimeError("model failed")
+
+        class _Resp:
+            content = self.content
+            usage = None
+
+        return _Resp()
+
+    def for_model(self, model_name: str) -> "FakeRegistry":
+        """J2：请求级模型覆盖（记录调用；未注册条目抛 KeyError）。"""
+        if model_name == "unknown-model":
+            raise KeyError(model_name)
+        self.model_called.append(model_name)
+        return self
 
 
 def _state(**overrides: Any) -> dict[str, Any]:
@@ -146,6 +170,59 @@ class TestGeneratorNode:
         assert updates["degraded"] is True
         assert updates["citations"] == []
         assert updates["answer"]  # 降级轻量回答非空
+
+    @pytest.mark.asyncio
+    async def test_fallback_failure_keeps_retry_counter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """M1：降级出口也持久化重试计数，防 generator↔self_correction 死循环。"""
+        fake = FakeRegistry("", raise_exc=True)
+        monkeypatch.setattr("app.agent.nodes.generator._get_registry", lambda: fake)
+        updates = await generator_node(_state(answer="旧答案"))
+        assert updates["degraded"] is True
+        assert updates["self_correction_retries"] == 1
+
+    @pytest.mark.asyncio
+    async def test_model_override_uses_for_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """J2/C6：请求级 model 走 for_model，不再静默忽略。"""
+        fake = FakeRegistry("覆盖模型答案[1]。")
+        monkeypatch.setattr("app.agent.nodes.generator._get_registry", lambda: fake)
+        updates = await generator_node(_state(model="gpt-main"))
+        assert fake.model_called == ["gpt-main"]
+        assert fake.fallback_called == 0
+        assert "覆盖模型答案" in updates["answer"]
+
+    @pytest.mark.asyncio
+    async def test_model_failure_falls_back_to_chain(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """覆盖模型未注册/调用失败时回退 fallback 链（D5 不抛错）。"""
+        fake = FakeRegistry("链上答案[1]。")
+        monkeypatch.setattr("app.agent.nodes.generator._get_registry", lambda: fake)
+        updates = await generator_node(_state(model="unknown-model"))
+        assert fake.model_called == []
+        assert fake.fallback_called == 1
+        assert "链上答案" in updates["answer"]
+
+    @pytest.mark.asyncio
+    async def test_correction_hint_and_history_in_prompt(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """M3/J17：重生成提示与多轮上下文进入 user prompt。"""
+        fake = FakeRegistry("修正答案[1]。")
+        monkeypatch.setattr("app.agent.nodes.generator._get_registry", lambda: fake)
+        await generator_node(
+            _state(
+                correction_hint="忠实度评分仅 0.40，评审理由：编造时间",
+                history_context="[历史1轮] Q: 鲈鱼怎么蒸 A: 蒸8分钟",
+            )
+        )
+        user_msg = fake.last_messages[-1]["content"]
+        assert "编造时间" in user_msg
+        assert "对话上下文" in user_msg
+        assert "鲈鱼怎么蒸" in user_msg
 
     @pytest.mark.asyncio
     async def test_regeneration_increments_retries(

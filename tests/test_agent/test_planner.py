@@ -106,6 +106,57 @@ class TestIncrementalPlan:
         assert len(updates["plan"]) == 3  # 1 既有 + 2 新增上限
 
 
+class TestSubQueriesPlan:
+    """m8：M2 合并产出的子问题分解直接作为检索步骤。"""
+
+    @pytest.mark.asyncio
+    async def test_sub_queries_become_dense_steps_no_llm(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake = FakeLLM('{"steps": []}')
+        monkeypatch.setattr("app.agent.nodes.planner._get_llm", lambda: fake)
+        updates = await planner_node(
+            _state(
+                intent=IntentType.MULTI_HOP,
+                sub_queries=["鲈鱼的处理步骤", "清蒸的火候"],
+            )
+        )
+        plan = updates["plan"]
+        assert [s.tool for s in plan] == ["dense", "dense"]
+        assert plan[0].query == "鲈鱼的处理步骤"
+        assert plan[1].query == "清蒸的火候"
+        assert fake.calls == 0  # 不再重复规划调用
+        assert updates["current_step"] == 0
+
+    @pytest.mark.asyncio
+    async def test_global_summary_prepends_global_step(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake = FakeLLM('{"steps": []}')
+        monkeypatch.setattr("app.agent.nodes.planner._get_llm", lambda: fake)
+        updates = await planner_node(
+            _state(
+                intent=IntentType.GLOBAL_SUMMARY,
+                sub_queries=["有哪些菜系", "代表菜是什么"],
+            )
+        )
+        plan = updates["plan"]
+        assert plan[0].tool == "global"
+        assert [s.tool for s in plan[1:]] == ["dense", "dense"]
+
+    @pytest.mark.asyncio
+    async def test_empty_sub_queries_falls_to_llm_plan(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake = FakeLLM(
+            '{"steps": [{"tool": "dense", "query": "清蒸鲈鱼做法"}]}'
+        )
+        monkeypatch.setattr("app.agent.nodes.planner._get_llm", lambda: fake)
+        updates = await planner_node(_state(sub_queries=[]))
+        assert fake.calls == 1
+        assert updates["plan"][0].tool == "dense"
+
+
 class TestLLMPlanGeneration:
     """首轮 LLM JSON 计划生成。"""
 

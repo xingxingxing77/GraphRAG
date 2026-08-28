@@ -27,7 +27,9 @@ async def _load_context(state: AgentState) -> str:
     ctx = await stack.scheduler.build_context(
         user_id=str(state.get("user_id", "")),
         session_id=str(state.get("session_id", "")),
-        current_query=str(state.get("query", "")),
+        # C1：情景检索向量必须用本轮原始问题——run 入参只带
+        # original_query，state["query"] 首轮为空、多轮为上一轮残留
+        current_query=str(state.get("original_query") or state.get("query", "")),
     )
     return ctx.context_text
 
@@ -37,14 +39,17 @@ async def load_memory_node(state: AgentState) -> dict[str, Any]:
 
     遗留锚点（10.4 F4 SSE 联调收口）：03 §3.4 updates 样例要求本节点
     帧载荷含计数字段 {injected_working_turns, episodic_hits,
-    dedup_removed}；当前 AgentState 无对应契约字段，仅返回注入后
-    query。补齐需加字段并与架构 §3.4 字段表 + routers 真值表同 PR。
+    dedup_removed}；当前 AgentState 无对应契约字段。补齐需加字段并
+    与架构 §3.4 字段表 + routers 真值表同 PR。
 
     Args:
         state: 当前 Agent 状态。
 
     Returns:
-        状态增量 {"query": 注入后查询}；无记忆或异常时返回空增量。
+        状态增量 {"query": 注入后查询, "history_context": 注入上下文}；
+        无记忆时也写回 query=C1 基准（冲掉 checkpoint 残留的旧改写
+        查询）并清零 run 级字段（answer/correction_hint/
+        self_correction_retries）；异常时仅返回降级原因。
     """
     # P0-04: 新 run 起点清理研究缓存（幂等，多次调用安全）
     try:
@@ -59,6 +64,16 @@ async def load_memory_node(state: AgentState) -> dict[str, Any]:
         logger.warning("load_memory 注入失败，原样放行: %s", exc)
         # E-09：记忆层故障 → no-memory 降级原因上报（9.1）
         return {"degraded_reasons": ["no-memory"]}
-    if not context_text:
-        return {}
-    return {"query": f"{context_text}\n\n{state.get('query', '')}"}
+    # C1：以本轮原始问题为基准（run 入参只带 original_query）；
+    # query 通道残留的上一轮改写查询不得参与本轮理解
+    original_query = str(state.get("original_query") or state.get("query", ""))
+    updates: dict[str, Any] = {
+        "query": f"{context_text}\n\n{original_query}" if context_text else original_query,
+        "history_context": context_text,
+        # 每 run 清零 run 级字段：同 thread 上一轮终态经 checkpoint
+        # 持久化，不清会误触发「重生成入口」计数与旧 hint 注入
+        "answer": "",
+        "correction_hint": "",
+        "self_correction_retries": 0,
+    }
+    return updates

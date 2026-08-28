@@ -24,14 +24,20 @@ logger = logging.getLogger(__name__)
 def _matched_doc_ids(state: AgentState) -> list[str]:
     """从累积证据提取去重 doc_id（rag_cache 反查失效联动依据）。
 
-    兼容 RetrievalResult 对象与 checkpoint 反序列化后的 dict 两种形态。
+    M5：doc_id 优先读顶层字段（fulltext 路的 doc_id 不在 metadata），
+    metadata 作回退；兼容 RetrievalResult 对象与 checkpoint 反序列化
+    后的 dict 两种形态。
     """
     doc_ids: list[str] = []
     for evidence in state.get("retrieved_evidence", []):
         metadata = getattr(evidence, "metadata", None)
         if metadata is None and isinstance(evidence, dict):
             metadata = evidence.get("metadata")
-        doc_id = (metadata or {}).get("doc_id")
+        doc_id = getattr(evidence, "doc_id", None)
+        if doc_id is None and isinstance(evidence, dict):
+            doc_id = evidence.get("doc_id")
+        if not doc_id:
+            doc_id = (metadata or {}).get("doc_id")
         if doc_id and str(doc_id) not in doc_ids:
             doc_ids.append(str(doc_id))
     return doc_ids

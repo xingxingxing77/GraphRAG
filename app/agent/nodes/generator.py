@@ -130,6 +130,8 @@ async def generator_node(state: AgentState) -> dict[str, Any]:
     query = state.get("query") or state.get("original_query", "")
     evidence = order_evidence_e1(list(state.get("retrieved_evidence") or []))
     evidence_block = build_evidence_block(evidence)
+    history_context = str(state.get("history_context") or "").strip()
+    correction_hint = str(state.get("correction_hint") or "").strip()
 
     updates: dict[str, Any] = {}
     # 重生成入口：已有答案草稿即为重生成，重试计数 +1（路由层限次）
@@ -137,31 +139,55 @@ async def generator_node(state: AgentState) -> dict[str, Any]:
         updates["self_correction_retries"] = (
             int(state.get("self_correction_retries", 0)) + 1
         )
-    if evidence:
-        user_prompt = f"参考资料：\n{evidence_block}\n\n用户问题：{query}"
-    else:
-        user_prompt = f"（无检索证据，请依据常识谨慎回答并注明不确定性）\n用户问题：{query}"
 
-    # M1：完整生成（fallback 链，J2）
+    # M3：重生成时注入自校正失败原因，避免同 prompt 原样重放；
+    # J17：多轮上下文供指代消解（load_memory 注入，改写在纯问题上）
+    sections: list[str] = []
+    if history_context:
+        sections.append(f"对话上下文（仅供理解指代，不要直接引用）：\n{history_context}")
+    if correction_hint:
+        sections.append(
+            f"重生成要求：上一版答案未通过忠实度校验（{correction_hint}），"
+            "请仅依据参考资料修正。"
+        )
+    if evidence:
+        sections.append(f"参考资料：\n{evidence_block}")
+    else:
+        sections.append("（无检索证据，请依据常识谨慎回答并注明不确定性）")
+    sections.append(f"用户问题：{query}")
+    messages = [
+        {"role": "system", "content": _GENERATOR_SYSTEM_PROMPT},
+        {"role": "user", "content": "\n\n".join(sections)},
+    ]
+
+    # M1：完整生成（J2：请求级 model 覆盖优先，失败回退角色默认链）
     try:
         registry = _get_registry()
-        resp = await registry.chat_with_fallback(
-            [
-                {"role": "system", "content": _GENERATOR_SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ]
-        )
+        model_name = str(state.get("model") or "").strip()
+        if model_name:
+            try:
+                resp = await registry.for_model(model_name).chat(messages)
+            except Exception as exc:  # noqa: BLE001 - 覆盖模型失败回退默认链
+                logger.warning(
+                    "请求级模型 %s 调用失败，回退 fallback 链: %s", model_name, exc
+                )
+                resp = await registry.chat_with_fallback(messages)
+        else:
+            resp = await registry.chat_with_fallback(messages)
         raw_answer = resp.content
         if resp.usage is not None:
             updates["token_usage"] = list(state.get("token_usage") or []) + [resp.usage]
     except Exception as exc:  # noqa: BLE001 - fallback 全败降级（llm-fallback）
         logger.warning("generator fallback 链全败，降级轻量回答: %s", exc)
         record_degraded("llm-fallback")
+        # M1：降级出口同样持久化重试计数——否则计数恒为 0，
+        # generator↔self_correction 会循环到 recursion_limit 才终止
         return {
             "answer": _FALLBACK_ANSWER,
             "citations": [],
             "degraded": True,
             "degraded_reasons": ["llm-fallback"],
+            **updates,
         }
 
     # 引用校验（E-03：无效编号剔除）+ Citation 列表按 E1 序重编

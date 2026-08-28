@@ -141,5 +141,38 @@ class TestBudgetAndDegradation:
         assert _parse_score("{bad") is None
         assert _parse_score('{"no_score": 1}') is None
 
+    def test_parse_judge_returns_reason(self) -> None:
+        """M3：judge 理由随分数一并解析（供重生成注入）。"""
+        from app.agent.nodes.self_correction import _parse_judge
+
+        score, reason = _parse_judge('{"score": 0.4, "reason": "时间编造"}')
+        assert score == pytest.approx(0.4)
+        assert reason == "时间编造"
+        assert _parse_judge('{"score": 0.9}') == (pytest.approx(0.9), "")
+        assert _parse_judge("{bad") == (None, "")
+
+    @pytest.mark.asyncio
+    async def test_low_score_injects_correction_hint(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """M3：低分时输出 correction_hint（含评审理由）。"""
+        fake = FakeLLM('{"score": 0.3, "reason": "编造蒸制时间"}')
+        monkeypatch.setattr("app.agent.nodes.self_correction._get_llm", lambda: fake)
+        updates = await self_correction_node(_state())
+        assert updates["faithfulness_score"] == pytest.approx(0.3)
+        assert "编造蒸制时间" in updates["correction_hint"]
+        assert "0.30" in updates["correction_hint"]
+
+    @pytest.mark.asyncio
+    async def test_high_score_clears_hint(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake = FakeLLM('{"score": 0.95}')
+        monkeypatch.setattr("app.agent.nodes.self_correction._get_llm", lambda: fake)
+        updates = await self_correction_node(
+            _state(correction_hint="旧提示")
+        )
+        assert updates["correction_hint"] == ""
+
     def test_threshold_from_config(self) -> None:
         assert FAITHFULNESS_THRESHOLD == pytest.approx(0.7)

@@ -648,11 +648,17 @@ class ChatRunInput(BaseModel):
         original_query: 用户原始查询。
         session_id: 会话 ID。
         user_id: 用户 ID。
+        latency_tier: 显式延迟档位（D4；auto 由意图矩阵在
+            query_understanding 定档回写实际档位）。
+        model: 请求级模型覆盖（J2，registry 条目名；空用 generator
+            角色默认 fallback 链）。
     """
 
     original_query: str = Field(..., min_length=1, max_length=2000)
     session_id: str | None = None
     user_id: str | None = None
+    latency_tier: Literal["auto", "fast", "standard", "deep"] = "auto"
+    model: str | None = None
 
     @field_validator("original_query", mode="after")
     @classmethod

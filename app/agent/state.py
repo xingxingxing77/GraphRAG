@@ -55,8 +55,14 @@ class AgentState(TypedDict):
         original_query: 用户原始查询。
         session_id: 会话 ID（02 §4 run 入参）。
         user_id: 用户 ID（02 §4 run 入参）。
+        history_context: load_memory 注入的多轮上下文（J17，与 query
+            分离存放供查询理解/生成消费，不再只靠拼接文本）。
         intent: 意图（fast 路径判定依据，M2 产出）。
-        latency_tier: 延迟档位（D4 三档）。
+        latency_tier: 延迟档位（D4；run 入参可为 auto，经
+            query_understanding 定档回写为具体档位）。
+        model: 请求级模型覆盖（J2，registry 条目名；空用角色默认链）。
+        sub_queries: M2 合并调用产出的子问题分解（multi_hop/
+            comparison 规划消费）。
         plan: 检索计划（PlanStep 列表）。
         current_step: 当前执行步骤。
         retrieved_evidence: 累积证据。
@@ -65,6 +71,8 @@ class AgentState(TypedDict):
         answer: 生成的答案草稿。
         faithfulness_score: ★ 自校正路由依据。
         self_correction_retries: ★ 重生成计数（上限 1）。
+        correction_hint: 自校正注入的重生成失败原因（M3，Generator
+            重入时消费；每 run 由 load_memory 清零防 checkpoint 残留）。
         citations: 引用列表。
         token_usage: 全程用量（每次 LLM 调用追加）。
         degraded: 是否降级运行（透传至 values 与 X-Degraded）。
@@ -83,8 +91,11 @@ class AgentState(TypedDict):
     original_query: str
     session_id: str
     user_id: str
+    history_context: str
     intent: IntentType
-    latency_tier: Literal["fast", "standard", "deep"]
+    latency_tier: Literal["auto", "fast", "standard", "deep"]
+    model: str | None
+    sub_queries: list[str]
     plan: list[PlanStep]
     current_step: int
     retrieved_evidence: list[RetrievalResult]
@@ -93,6 +104,7 @@ class AgentState(TypedDict):
     answer: str
     faithfulness_score: float  # ★
     self_correction_retries: int  # ★
+    correction_hint: str
     citations: list[Citation]
     token_usage: list[TokenUsage]
     degraded: bool
