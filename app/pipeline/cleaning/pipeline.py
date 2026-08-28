@@ -87,6 +87,7 @@ class CleaningPipeline:
             structure_tree=doc.structure_tree,
         )
         applied: list[str] = []
+        failed_rules: list[str] = []
         for rule in self._rules:
             if not rule.enabled:
                 continue
@@ -95,8 +96,10 @@ class CleaningPipeline:
                 current = await rule.process(current, merged)
                 applied.append(rule.name)
             except Exception:
-                logger.exception("清洗规则 %s 执行失败，跳过", rule.name)
-                raise
+                # D5：单规则失败仅跳过该规则继续清洗——此前 raise 会让
+                # 一条规则异常导致整文档不入索引，与日志「跳过」相悖
+                logger.exception("清洗规则 %s 执行失败，跳过该规则", rule.name)
+                failed_rules.append(rule.name)
 
         # 敏感信息脱敏（架构 P3 内容安全过滤，透传 gate 实例模式 P2-01）
         gate_patterns = getattr(self.gate, "_pii_patterns", None)
@@ -109,6 +112,7 @@ class CleaningPipeline:
             self.gate.register(current.text)
         meta = {
             "applied_rules": applied,
+            "failed_rules": failed_rules,
             "pii_masked": pii_hits,
             **self.gate.to_meta(report),
         }
