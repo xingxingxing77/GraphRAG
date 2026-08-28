@@ -18,7 +18,7 @@ from typing import Any
 
 # --- 本地模块 ---
 from app.core.models import RetrievalResult, SourceKind
-from app.db.es_client import ESClient
+from app.db.es_client import ENTITIES_ALIAS, CHUNKS_ALIAS, ESClient
 from app.db.neo4j_client import Neo4jClient
 from app.retrieval.base import BaseRetriever
 from app.retrieval.dense_retriever import stable_hash
@@ -124,6 +124,12 @@ class FullTextRetriever(BaseRetriever):
                     metadata={"entity_id": hit.get("id"), "canonical_name": str(canonical)},
                 )
             )
+        # M2：BM25 无界（通常 ≥1）→ 按本批最大分归一到 [0,1]，
+        # 否则一条 BM25 结果即可让 A2「证据充分」短路恒真
+        max_score = max((r.score for r in results), default=0.0)
+        if max_score > 0:
+            results = [r.model_copy(update={"score": r.score / max_score}) for r in results]
+        results.sort(key=lambda x: -x.score)
         return results[:top_k]
 
     async def _es_recall(self, query: str, top_k: int) -> list[dict[str, Any]]:
@@ -137,13 +143,13 @@ class FullTextRetriever(BaseRetriever):
             命中列表（含 id/score/source 字段）。
         """
         try:
-            hits = await self.es_client.search("rag_entities", "name", query, top_k)
+            hits = await self.es_client.search(ENTITIES_ALIAS, "name", query, top_k)
             if hits:
                 return hits
         except Exception:  # noqa: BLE001 - 回退 rag_chunks
             pass
         try:
-            return await self.es_client.search("rag_chunks", "content", query, top_k)
+            return await self.es_client.search(CHUNKS_ALIAS, "content", query, top_k)
         except Exception:  # noqa: BLE001 - ES 无索引/不可达
             return []
 

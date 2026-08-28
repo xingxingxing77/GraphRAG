@@ -44,6 +44,10 @@ class FakeEmbedder:
     async def embed(self, texts: list[str]) -> EmbeddingResult:
         return EmbeddingResult()
 
+    async def embed_dense(self, texts: list[str]) -> list[list[float]]:
+        """dense-only 通道（M7：协议新增）。"""
+        return []
+
 
 class TestProtocolConformance:
     """Protocol 结构子类型检查（runtime_checkable 冒烟）。"""

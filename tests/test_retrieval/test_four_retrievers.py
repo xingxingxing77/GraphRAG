@@ -123,7 +123,8 @@ class TestFullTextJ6:
         assert len(results) == 1
         assert results[0].source == SourceKind.FULLTEXT
         assert "USES" in results[0].content  # 回投扩展生效
-        assert results[0].score == 2.5
+        # M2：BM25 按本批最大分归一 → 唯一命中归一为 1.0
+        assert results[0].score == pytest.approx(1.0)
 
     @pytest.mark.asyncio
     async def test_es_hit_neo4j_deleted_null_skip(self) -> None:

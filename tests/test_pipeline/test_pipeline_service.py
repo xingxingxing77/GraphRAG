@@ -16,7 +16,10 @@ from app.core.models import EnrichedChunk, RawDocument
 from app.pipeline.chunking.strategy import chunk_document
 from app.pipeline.cleaning.pipeline import CleaningPipeline
 from app.pipeline.config import ChunkingConfig
-from app.pipeline.indexing.pipeline_service import PipelineService
+from app.pipeline.indexing.pipeline_service import (
+    PipelineService,
+    collect_entity_docs,
+)
 from app.pipeline.parsing.router import FormatRouter
 
 
@@ -46,10 +49,16 @@ class FakeESSyncer:
 
     def __init__(self) -> None:
         self.syncs: list[int] = []
+        self.entity_syncs: list[int] = []
 
     async def sync_chunks(self, docs: list[dict]) -> int:
         self.syncs.append(len(docs))
         return len(docs)
+
+    async def sync_entities(self, entities: list[dict]) -> int:
+        """M9：实体文档同步（rag_entities）。"""
+        self.entity_syncs.append(len(entities))
+        return len(entities)
 
 
 def _raw_doc(doc_id: str, source: str, text: str) -> RawDocument:
@@ -95,6 +104,81 @@ async def test_pipeline_indexes_document_end_to_end() -> None:
     assert vector.calls and vector.calls[0][0] == stats.chunks
     assert graph.writes == [stats.chunks]
     assert es.syncs == [stats.chunks]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_syncs_entities_to_es(monkeypatch: pytest.MonkeyPatch) -> None:
+    """M9：本批实体同步 rag_entities（fulltext 实体召回/J6 扩展的前提）。
+
+    当前管线实体由 LLM 增强产出（无 LLM 时为空），故经 monkeypatch
+    向 enrich 产物注入实体，验证编排层的同步接线本身。
+    """
+    from app.core.models import EntityMention
+
+    es = FakeESSyncer()
+    svc = _service(FakeVectorIndexer(), FakeGraphWriter(), es)
+
+    real_enrich = __import__(
+        "app.pipeline.indexing.pipeline_service", fromlist=["enrich_chunks"]
+    ).enrich_chunks
+
+    async def fake_enrich(chunks, source_path, quality_score=None, lang=None):
+        enriched = await real_enrich(chunks, source_path, quality_score, lang)
+        return [
+            e.model_copy(
+                update={
+                    "entities": [
+                        EntityMention(name="清蒸鲈鱼", type="菜品"),
+                        EntityMention(name="姜", type="食材"),
+                    ]
+                }
+            )
+            for e in enriched
+        ]
+
+    monkeypatch.setattr(
+        "app.pipeline.indexing.pipeline_service.enrich_chunks", fake_enrich
+    )
+    doc = _raw_doc(
+        "doc-recipes-1",
+        "menu/HowToCook/dishes/aquatic/清蒸鲈鱼.md",
+        "# 清蒸鲈鱼\n\n## 食材\n\n鲈鱼一条约六百克，姜片若干，葱段若干，蒸鱼豉油两勺，食用油一勺。\n\n## 做法\n\n将鲈鱼去鳞去鳃去内脏洗净，鱼身两侧各划两刀便于入味。\n盘中铺姜片与葱段垫底，放上鲈鱼，鱼腹内也塞入姜葱。\n蒸锅加水烧开后放入鱼盘，大火隔水蒸八分钟出锅。\n倒掉盘中腥水，拣去姜葱，鱼身铺新切的葱丝。\n淋上两勺蒸鱼豉油，烧一勺热油浇在葱丝上激出香味即可上桌。",
+    )
+    await svc.index_documents([doc])
+    assert es.entity_syncs and es.entity_syncs[0] >= 1
+
+
+def test_collect_entity_docs_dedup_and_canonical() -> None:
+    """collect_entity_docs：canonical 优先、跨 chunk 去重、type 回填。"""
+    from app.core.models import Chunk, EntityMention, PositionMeta
+
+    def _chunk(seq: int, entities: list[EntityMention]) -> EnrichedChunk:
+        return EnrichedChunk(
+            chunk=Chunk(
+                chunk_id=f"doc-1-{seq}",
+                doc_id="doc-1",
+                seq=seq,
+                content="内容",
+                title_path=[],
+                position=PositionMeta(start_char=0, end_char=2),
+                metadata={},
+            ),
+            entities=entities,
+        )
+
+    chunks = [
+        _chunk(0, [EntityMention(name="鲈鱼", type="食材", normalized_to="清蒸鲈鱼")]),
+        _chunk(1, [EntityMention(name="清蒸鲈鱼", type="菜品")]),
+        _chunk(2, [EntityMention(name="", type="食材")]),  # 空名剔除
+    ]
+    docs = collect_entity_docs(chunks)
+    # 「鲈鱼」归一到「清蒸鲈鱼」后与 chunk1 跨 chunk 合并为同一实体；
+    # 空名提及剔除
+    assert len(docs) == 1
+    canonical_doc = docs[0]
+    assert canonical_doc["entity_id"] == "清蒸鲈鱼"
+    assert canonical_doc["type"] == "食材"
+    assert canonical_doc["zone"] == "open"
 
 
 @pytest.mark.asyncio

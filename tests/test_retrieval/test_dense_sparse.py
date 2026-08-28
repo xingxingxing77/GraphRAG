@@ -27,6 +27,10 @@ class FakeEmbedder:
             sparse=[{1: 1.0, 2: 0.5} for _ in range(n)],
         )
 
+    async def embed_dense(self, texts: list[str]) -> list[list[float]]:
+        """dense-only 通道（M7：协议新增，替身同步实现）。"""
+        return [[0.1, 0.2, 0.3] for _ in texts]
+
 
 class FakeQdrant:
     """Qdrant 测试替身：可控延迟/异常/命中。"""
@@ -130,6 +134,9 @@ class TestDegradation:
         class EmptySparseEmbedder:
             async def embed(self, texts):
                 return EmbeddingResult(dense=[[0.1]], sparse=[{}])
+
+            async def embed_dense(self, texts):
+                return [[0.1]]
 
         retriever = SparseRetriever(FakeQdrant(), EmptySparseEmbedder(), ["rag_recipes"])
         assert await retriever.retrieve("q", top_k=2) == []

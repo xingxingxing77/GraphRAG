@@ -22,13 +22,8 @@ import yaml
 
 # --- 本地模块 ---
 from app.agent.state import AgentState
-from app.core.config import get_settings
 from app.core.models import PlanStep, RetrievalResult, SourceKind
-from app.db.es_client import ESClient
-from app.db.neo4j_client import Neo4jClient
-from app.db.qdrant_client import QdrantDBClient
-from app.embedding.ollama_client import OllamaClient
-from app.embedding.service import BgeM3EmbeddingService
+from app.db.collections import is_business_collection
 from app.retrieval.base import BaseRetriever
 from app.retrieval.dense_retriever import DenseRetriever
 from app.retrieval.fulltext_retriever import FullTextRetriever
@@ -279,10 +274,23 @@ async def tool_router_node(state: AgentState) -> dict[str, Any]:
 
 # --- 检索器集线器（惰性单例，依赖不可用时抛错由调用方降级） ---
 _hub: dict[str, BaseRetriever] | None = None
+# M8：集合快照兜底——qdrant 故障时沿用上次枚举结果，hub 不因
+# list_collections 失败而不可用（graph 系 error_count 统计保持连续）
+_last_collections: list[str] = []
 
 
 async def _get_retriever_hub() -> dict[str, BaseRetriever]:
     """构建/复用六路检索器集线器（测试可 monkeypatch）。
+
+    C4：客户端与 embedding 服务复用 deps 单例——sparse 通道的
+    FlagClient 随 get_embedding_service 一并接入，六路检索不再退化为
+    五路；连接池统一由 deps.close_all_clients 管理。
+    M8：Dense/Sparse 每次调用按最新集合枚举重建（一次廉价 HTTP），
+    admin 重建/新增集合后无需重启即可检索；graph 系检索器实例保持
+    复用（error_count 跨轮累积是 E-07 no-graph 判定的依据）。
+    C3：集合枚举经 is_business_collection 排除记忆层
+    （rag_cache/rag_episodic 的 payload 无 content，混入会产出
+    空内容高分配的伪证据）。
 
     Returns:
         {tool_name: retriever} 字典。
@@ -290,30 +298,31 @@ async def _get_retriever_hub() -> dict[str, BaseRetriever]:
     Raises:
         Exception: 依赖客户端构建失败。
     """
-    global _hub
-    if _hub is not None:
-        return _hub
+    global _hub, _last_collections
 
     # 顶层已导入，此处不再惰性导入以避免首个 async 节点内触发 import 阻塞
+    import app.api.deps as deps
 
-    settings = get_settings()
-    qdrant = QdrantDBClient(host=settings.qdrant_host, port=settings.qdrant_port)
-    es = ESClient(host=settings.elasticsearch_host)
-    neo4j = Neo4jClient(
-        uri=settings.neo4j_uri, user=settings.neo4j_user, password=settings.neo4j_password
-    )
-    embedding = BgeM3EmbeddingService(
-        ollama_client=OllamaClient(base_url=settings.ollama_base_url),
-        model_name=settings.embedding_model,
-        flag_client=None,
-    )
-    collections = [c for c in await qdrant.list_collections() if c.startswith("rag_")]
-    _hub = {
-        SourceKind.DENSE.value: DenseRetriever(qdrant, embedding, collections),
-        SourceKind.SPARSE.value: SparseRetriever(qdrant, embedding, collections),
-        SourceKind.GRAPH.value: GraphRetriever(neo4j),
-        SourceKind.GLOBAL.value: GlobalRetriever(neo4j),
-        SourceKind.FULLTEXT.value: FullTextRetriever(es, neo4j),
-        SourceKind.WEB.value: WebRetriever(tavily_api_key=None),
-    }
+    qdrant = await deps.shared_qdrant_client()
+    es = await deps.shared_es_client()
+    neo4j = await deps.shared_neo4j_client()
+    embedding = await deps.get_embedding_service()
+    try:
+        collections = [
+            c for c in await qdrant.list_collections() if is_business_collection(c)
+        ]
+        _last_collections = collections
+    except Exception:  # noqa: BLE001 - 枚举失败沿用上次快照（降级）
+        collections = _last_collections
+
+    if _hub is None:
+        _hub = {
+            SourceKind.GRAPH.value: GraphRetriever(neo4j),
+            SourceKind.GLOBAL.value: GlobalRetriever(neo4j),
+            SourceKind.FULLTEXT.value: FullTextRetriever(es, neo4j),
+            SourceKind.WEB.value: WebRetriever(tavily_api_key=None),
+        }
+    # Dense/Sparse 依赖集合列表，按最新快照重建（薄包装，成本可忽略）
+    _hub[SourceKind.DENSE.value] = DenseRetriever(qdrant, embedding, collections)
+    _hub[SourceKind.SPARSE.value] = SparseRetriever(qdrant, embedding, collections)
     return _hub

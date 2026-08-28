@@ -44,12 +44,8 @@ _reranker_lock = asyncio.Lock()
 _redis_lock = asyncio.Lock()
 
 
-async def get_neo4j_client() -> AsyncGenerator[Neo4jClient, None]:
-    """获取 Neo4j 客户端实例（依赖注入，单例复用驱动）。
-
-    Yields:
-        Neo4jClient: 已连接的 Neo4j 客户端。
-    """
+async def shared_neo4j_client() -> Neo4jClient:
+    """获取 Neo4j 单例（纯函数形态，供 Depends 之外的模块复用，M8）。"""
     global _neo4j_client
     if _neo4j_client is None:
         async with _neo4j_lock:
@@ -60,18 +56,23 @@ async def get_neo4j_client() -> AsyncGenerator[Neo4jClient, None]:
                     user=settings.neo4j_user,
                     password=settings.neo4j_password,
                 )
-    yield _neo4j_client
+    return _neo4j_client
+
+
+async def get_neo4j_client() -> AsyncGenerator[Neo4jClient, None]:
+    """获取 Neo4j 客户端实例（依赖注入，单例复用驱动）。
+
+    Yields:
+        Neo4jClient: 已连接的 Neo4j 客户端。
+    """
+    yield await shared_neo4j_client()
 
 
 _neo4j_client: Neo4jClient | None = None
 
 
-async def get_qdrant_client() -> AsyncGenerator[QdrantDBClient, None]:
-    """获取 Qdrant 客户端实例（依赖注入，单例复用）。
-
-    Yields:
-        QdrantDBClient: 已配置的 Qdrant 客户端。
-    """
+async def shared_qdrant_client() -> QdrantDBClient:
+    """获取 Qdrant 单例（纯函数形态，供 Depends 之外的模块复用，M8）。"""
     global _qdrant_client
     if _qdrant_client is None:
         async with _qdrant_lock:
@@ -80,10 +81,30 @@ async def get_qdrant_client() -> AsyncGenerator[QdrantDBClient, None]:
                 _qdrant_client = QdrantDBClient(
                     host=settings.qdrant_host, port=settings.qdrant_port
                 )
-    yield _qdrant_client
+    return _qdrant_client
+
+
+async def get_qdrant_client() -> AsyncGenerator[QdrantDBClient, None]:
+    """获取 Qdrant 客户端实例（依赖注入，单例复用）。
+
+    Yields:
+        QdrantDBClient: 已配置的 Qdrant 客户端。
+    """
+    yield await shared_qdrant_client()
 
 
 _qdrant_client: QdrantDBClient | None = None
+
+
+async def shared_es_client() -> ESClient:
+    """获取 ES 单例（纯函数形态，供 Depends 之外的模块复用，M8）。"""
+    global _es_client
+    if _es_client is None:
+        async with _es_lock:
+            if _es_client is None:
+                settings = get_settings()
+                _es_client = ESClient(host=settings.elasticsearch_host)
+    return _es_client
 
 
 async def get_es_client() -> AsyncGenerator[ESClient, None]:
@@ -92,13 +113,7 @@ async def get_es_client() -> AsyncGenerator[ESClient, None]:
     Yields:
         ESClient: 已配置的 ES 客户端。
     """
-    global _es_client
-    if _es_client is None:
-        async with _es_lock:
-            if _es_client is None:
-                settings = get_settings()
-                _es_client = ESClient(host=settings.elasticsearch_host)
-    yield _es_client
+    yield await shared_es_client()
 
 
 _es_client: ESClient | None = None
@@ -241,8 +256,14 @@ _memory_stack_lock = asyncio.Lock()
 
 
 async def close_all_clients() -> None:
-    """关闭所有单例客户端（lifespan 关闭期调用，P0-02/P0-03）。"""
+    """关闭所有单例客户端（lifespan 关闭期调用，P0-02/P0-03）。
+
+    m13：模型/服务类单例（embedding/reranker/ingestion）同步复位为
+    None——只关连接不复位的话，重复 lifespan（测试/热重启）会复用
+    已关闭的 OllamaClient 连接。
+    """
     global _neo4j_client, _qdrant_client, _es_client, _redis_client, _memory_stack
+    global _embedding_service, _reranker, _ingestion_service
     for client in (_neo4j_client, _qdrant_client, _es_client, _redis_client):
         if client is not None:
             try:
@@ -256,6 +277,16 @@ async def close_all_clients() -> None:
             except Exception:
                 pass
         _memory_stack = None
+    if _embedding_service is not None:
+        ollama = getattr(_embedding_service, "ollama_client", None)
+        if ollama is not None:
+            try:
+                await ollama.close()
+            except Exception:
+                pass
+    _embedding_service = None
+    _reranker = None
+    _ingestion_service = None
     _neo4j_client = _qdrant_client = _es_client = _redis_client = None
 
 # 记忆层策略参数（config/reliability.yaml memory 节，读取失败用默认；

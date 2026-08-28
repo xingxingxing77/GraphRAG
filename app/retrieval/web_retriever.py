@@ -100,12 +100,15 @@ class WebRetriever(BaseRetriever):
             content = str(item.get("content") or item.get("title") or "")
             if not content:
                 continue
+            # M2：排名启发分 clamp 到 [0.05,1.0]（原始 1.0 - i*0.05 在
+            # i≥20 时为负；Tavily 外部分也可能越界）
+            score = max(0.05, min(1.0, float(item.get("score") or (1.0 - i * 0.05))))
             results.append(
                 RetrievalResult(
                     result_id=f"{self.name.value}:{stable_hash(url or str(i), content[:32])}",
                     chunk_id=None,
                     content=content,
-                    score=float(item.get("score") or (1.0 - i * 0.05)),
+                    score=score,
                     source=self.name,
                     doc_id=None,
                     metadata={"url": url, "title": str(item.get("title") or "")},

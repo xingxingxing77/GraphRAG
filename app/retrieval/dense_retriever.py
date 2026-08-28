@@ -6,7 +6,7 @@ Qdrant 密集向量检索器（架构 L3 · 05 §3.2/§3.3 · 单元 3.3）。
 - result_id = f"dense:{stable_hash}"，全局唯一、融合层去重键；
 - 独立超时（reliability.yaml timeouts_seconds.qdrant），超时/失败
   返回空列表 + 错误计数，不抛错（D5 降级）；
-- score = Cosine 相似度原始分（归一化前，融合层负责归一化）。
+- score = Cosine 相似度（Qdrant 输出即 [0,1]，无需再归一化）。
 """
 
 # --- 标准库 ---
@@ -85,7 +85,7 @@ class DenseRetriever(BaseRetriever):
             filters: 预留过滤条件（暂未启用）。
 
         Returns:
-            检索结果列表（Cosine 原始分降序），失败返回空列表。
+            检索结果列表（Cosine 分降序，口径 [0,1]），失败返回空列表。
         """
         try:
             return await asyncio.wait_for(
@@ -109,11 +109,12 @@ class DenseRetriever(BaseRetriever):
         Returns:
             聚合后的检索结果列表。
         """
-        result = await self.embedding_service.embed([query])
-        if not result.dense or not result.dense[0]:
+        # M7：dense-only 场景走 embed_dense，免跑 FlagEmbedding 稀疏编码
+        # （结果被丢弃却占全局 semaphore，装了 FlagEmbedding 反而更慢）
+        query_vec = (await self.embedding_service.embed_dense([query]))[0]
+        if not query_vec:
             logger.warning("dense 嵌入返回空向量，降级空列表")
             return []
-        query_vec = result.dense[0]
 
         hits: list[RetrievalResult] = []
         for collection in self.collection_names:
@@ -122,11 +123,16 @@ class DenseRetriever(BaseRetriever):
             )
             for r in raw:
                 chunk_id = r.get("chunk_id") or ""
+                content = str(r.get("payload", {}).get("content", ""))
+                # C3 防御：payload 缺 content 的命中（如记忆层混入/脏数据）
+                # 一律丢弃，避免产出空内容证据与融合层空串哈希错误合并
+                if not content:
+                    continue
                 hits.append(
                     RetrievalResult(
                         result_id=f"{self.name.value}:{stable_hash(chunk_id, r['id'])}",
                         chunk_id=chunk_id or None,
-                        content=str(r.get("payload", {}).get("content", "")),
+                        content=content,
                         score=float(r["score"]),
                         source=self.name,
                         doc_id=str(r.get("payload", {}).get("doc_id") or "") or None,

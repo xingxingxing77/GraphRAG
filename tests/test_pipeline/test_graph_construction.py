@@ -96,6 +96,10 @@ class _FakeEmbedder:
             dense=[self.vectors.get(t, [1.0, 0.0]) for t in texts]
         )
 
+    async def embed_dense(self, texts: list[str]) -> list[list[float]]:
+        """dense-only 通道（M7：协议新增，替身同步实现）。"""
+        return [self.vectors.get(t, [1.0, 0.0]) for t in texts]
+
 
 def _vec(sim: float) -> list[float]:
     """构造与 [1,0] 余弦相似度为 sim 的单位向量。"""

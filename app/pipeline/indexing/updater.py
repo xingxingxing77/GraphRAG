@@ -17,13 +17,11 @@ import logging
 
 # --- 本地模块 ---
 from app.core.models import RawDocument
+from app.db.collections import is_business_collection
 from app.db.es_client import CHUNKS_ALIAS
 from app.pipeline.indexing.pipeline_service import IndexStats, PipelineService
 
 logger = logging.getLogger(__name__)
-
-# 业务集合前缀（04 §3.1 rag_{doc_type}）
-_COLLECTION_PREFIX = "rag_"
 
 
 class IndexUpdater:
@@ -76,11 +74,11 @@ class IndexUpdater:
         Args:
             doc_id: 文档唯一标识（RawDocument.doc_id）。
         """
-        # ① Qdrant：遍历业务集合按 doc_id 删 points
+        # ① Qdrant：遍历业务集合按 doc_id 删 points（m9：排除记忆层）
         try:
             collections = await self.pipeline.vector_indexer.db_client.list_collections()
             for name in collections:
-                if name.startswith(_COLLECTION_PREFIX):
+                if is_business_collection(name):
                     await self.pipeline.vector_indexer.db_client.delete_by_doc(name, doc_id)
         except Exception as exc:  # noqa: BLE001 - 删除失败记日志继续（M3/D5）
             logger.warning("Qdrant 删除 doc_id=%s 失败: %s", doc_id, exc)

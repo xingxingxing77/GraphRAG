@@ -62,6 +62,43 @@ def chunk_to_es_doc(chunk: EnrichedChunk) -> dict[str, Any]:
     }
 
 
+def collect_entity_docs(chunks: list[EnrichedChunk]) -> list[dict[str, Any]]:
+    """收集本批 chunk 的去重实体文档（M9：rag_entities 同步，J6）。
+
+    entity_id 取 canonical_name（与 admin 审核流/Neo4j MERGE 键同源，
+    app/api/endpoints/admin.py 的 `RETURN e.canonical_name AS entity_id`）；
+    zone 恒 open（G4：开放区实体，升级走 admin 审核流）。
+
+    Args:
+        chunks: 增强块列表。
+
+    Returns:
+        去重后的实体文档列表（entity_id/canonical_name/name/type/
+        aliases/description/zone）。
+    """
+    docs: dict[str, dict[str, Any]] = {}
+    for chunk in chunks:
+        for mention in chunk.entities:
+            canonical = str(mention.normalized_to or mention.name or "").strip()
+            if not canonical:
+                continue
+            doc = docs.get(canonical)
+            if doc is None:
+                doc = {
+                    "entity_id": canonical,
+                    "canonical_name": canonical,
+                    "name": canonical,
+                    "type": str(mention.type or "Other"),
+                    "aliases": [],
+                    "description": "",
+                    "zone": "open",
+                }
+                docs[canonical] = doc
+            elif mention.type and mention.type != "Other" and doc["type"] == "Other":
+                doc["type"] = str(mention.type)
+    return list(docs.values())
+
+
 class PipelineService:
     """端到端索引编排器（GAP-A3）。
 
@@ -107,8 +144,10 @@ class PipelineService:
         """
         # ① Qdrant：清空业务向量集合（记忆层集合跳过）
         try:
+            from app.db.collections import is_business_collection
+
             for name in await self.vector_indexer.db_client.list_collections():
-                if name.startswith("rag_") and name not in ("rag_cache", "rag_episodic"):
+                if is_business_collection(name):
                     deleted = await self.vector_indexer.db_client.clear_collection(name)
                     logger.info("Qdrant 清空集合 %s：%d points", name, deleted)
         except Exception as exc:  # noqa: BLE001 - 清空失败不阻断重建
@@ -167,6 +206,11 @@ class PipelineService:
                 fulltext_written = await self.es_syncer.sync_chunks(
                     [chunk_to_es_doc(c) for c in enriched]
                 )
+                # M9：实体同步 ES（rag_entities）——否则 fulltext 检索的
+                # 实体优先召回与 J6 一跳邻域扩展因索引恒空而从不触发
+                entity_docs = collect_entity_docs(enriched)
+                if entity_docs:
+                    await self.es_syncer.sync_entities(entity_docs)
             except Exception as exc:  # noqa: BLE001 - 单文档索引失败不阻塞整批
                 logger.warning("三索引入库失败（%s）: %s", raw.source_path, exc)
                 stats.failed += 1

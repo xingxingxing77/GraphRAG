@@ -5,7 +5,7 @@
 召回 (:Community) 社区摘要。实现 BaseRetriever 协议：
 - result_id = f"global:{stable_hash}"；
 - 独立超时 + 失败降级空列表（D5）；
-- score = 关键词命中启发分（归一化前）。
+- score = 关键词命中启发分（字符重合度 ∈ [0,1]，M2 归一口径）。
 """
 
 # --- 标准库 ---
@@ -103,9 +103,10 @@ class GlobalRetriever(BaseRetriever):
             summary = str(row.get("summary") or "")
             if not summary:
                 continue
-            # 关键词命中启发分（字符重合度，归一化前）
+            # 关键词命中启发分（字符重合度；M2：去掉 1.0 基座，恒 ≥1 的
+            # 原始口径会让 A2 短路/B3 修剪等 0-1 阈值消费失真）
             overlap = len(query_tokens & set(summary))
-            score = 1.0 + overlap / max(1, len(query_tokens))
+            score = overlap / max(1, len(query_tokens))
             community_id = str(row.get("community_id") or "")
             hits.append(
                 RetrievalResult(

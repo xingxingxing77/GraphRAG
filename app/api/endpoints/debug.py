@@ -39,6 +39,7 @@ from app.core.models import (
     SourceKind,
 )
 from app.db.es_client import ESClient
+from app.db.collections import is_business_collection
 from app.db.neo4j_client import Neo4jClient
 from app.db.qdrant_client import QdrantDBClient
 from app.embedding.base import EmbeddingService
@@ -157,7 +158,9 @@ async def debug_retrieve(
             f"非法检索源: {[s.value for s in unsupported]}",
         )
 
-    collections = [c for c in await qdrant.list_collections() if c.startswith("rag_")]
+    # C3：仅业务集合——记忆层（rag_cache/rag_episodic）的 payload 无
+    # content，混入会产出空内容高分配的伪结果误导排障
+    collections = [c for c in await qdrant.list_collections() if is_business_collection(c)]
     results: dict[str, list[RetrievalResult]] = {}
     retrievers: list[BaseRetriever] = []
     if SourceKind.DENSE in requested:

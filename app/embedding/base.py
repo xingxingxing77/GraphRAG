@@ -31,3 +31,14 @@ class EmbeddingService(Protocol):
             EmbeddingResult: dense shape (n, 1024) + sparse {token_id: weight}。
         """
         ...
+
+    async def embed_dense(self, texts: list[str]) -> list[list[float]]:
+        """仅获取密集向量（M7：dense-only 消费方专用，免跑稀疏编码）。
+
+        Args:
+            texts: 待向量化的文本列表。
+
+        Returns:
+            密集向量列表，shape (n, 1024)。
+        """
+        ...

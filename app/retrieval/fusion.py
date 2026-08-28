@@ -156,10 +156,18 @@ class FusionEngine:
                 if current is None or result.score > current.score:
                     representative[key] = result
         ordered = sorted(accumulated.items(), key=lambda kv: -kv[1])
-        return [
-            representative[key].model_copy(update={"score": score})
-            for key, score in ordered[:top_n]
-        ]
+        # M2：RRF 累计分上限 ≈ 6/(k+1) ≈ 0.098，与下游 0-1 阈值口径
+        # （B3 修剪/A2 短路）不可比 → 按本批最大 RRF 归一化到 [0,1]，
+        # 原始累计分保留在 metadata["rrf"]
+        max_rrf = ordered[0][1] if ordered else 0.0
+        fused: list[RetrievalResult] = []
+        for key, score in ordered[:top_n]:
+            rep = representative[key]
+            meta = dict(rep.metadata or {})
+            meta["rrf"] = score
+            norm = score / max_rrf if max_rrf > 0 else 0.0
+            fused.append(rep.model_copy(update={"score": norm, "metadata": meta}))
+        return fused
 
     def _weighted_fusion(
         self,

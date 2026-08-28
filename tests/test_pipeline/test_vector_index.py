@@ -43,6 +43,10 @@ class FakeEmbedder:
         sparse = [{i + 1: 1.0, i + 2: 0.5} for i in range(len(texts))]
         return EmbeddingResult(dense=dense, sparse=sparse)
 
+    async def embed_dense(self, texts: list[str]) -> list[list[float]]:
+        """dense-only 通道（M7：协议新增，替身同步实现）。"""
+        return [[float(i + 1)] * self.dim for i in range(len(texts))]
+
 
 def _enriched_chunks() -> list[EnrichedChunk]:
     """构造两个测试 EnrichedChunk。"""

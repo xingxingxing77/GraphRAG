@@ -190,3 +190,7 @@ class FakeEmbedder:
             dense=[self._vector(t) for t in texts],
             sparse=[{} for _ in texts],
         )
+
+    async def embed_dense(self, texts: list[str]) -> list[list[float]]:
+        """dense-only 通道（M7：协议新增，替身同步实现）。"""
+        return [self._vector(t) for t in texts]

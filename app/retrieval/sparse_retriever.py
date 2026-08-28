@@ -5,7 +5,8 @@ Qdrant 稀疏向量检索器（架构 L3 · 05 §3.2/§3.3 · 单元 3.3）。
 实现 BaseRetriever 协议（架构 §3.5）：
 - result_id = f"sparse:{stable_hash}"；
 - 独立超时 + 失败降级空列表（D5）；
-- score = named sparse vector Dot Product 原始分（归一化前）。
+- score = named sparse vector Dot Product 按本批最大分归一化（[0,1]，
+  M2：原始 Dot 无界，跨路阈值消费前必须归一）。
 """
 
 # --- 标准库 ---
@@ -71,7 +72,7 @@ class SparseRetriever(BaseRetriever):
             filters: 预留过滤条件（暂未启用）。
 
         Returns:
-            检索结果列表（Dot 原始分降序），失败返回空列表。
+            检索结果列表（归一化分降序），失败返回空列表。
         """
         try:
             return await asyncio.wait_for(
@@ -107,16 +108,24 @@ class SparseRetriever(BaseRetriever):
             )
             for r in raw:
                 chunk_id = r.get("chunk_id") or ""
+                content = str(r.get("payload", {}).get("content", ""))
+                # C3 防御：payload 缺 content 的命中一律丢弃（同 dense）
+                if not content:
+                    continue
                 hits.append(
                     RetrievalResult(
                         result_id=f"{self.name.value}:{stable_hash(chunk_id, r['id'])}",
                         chunk_id=chunk_id or None,
-                        content=str(r.get("payload", {}).get("content", "")),
+                        content=content,
                         score=float(r["score"]),
                         source=self.name,
                         doc_id=str(r.get("payload", {}).get("doc_id") or "") or None,
                         metadata=dict(r.get("payload") or {}),
                     )
                 )
+        # M2：Dot 无界 → 按本批最大分归一到 [0,1]，与 dense/B3 修剪阈值同口径
+        max_score = max((h.score for h in hits), default=0.0)
+        if max_score > 0:
+            hits = [h.model_copy(update={"score": h.score / max_score}) for h in hits]
         hits.sort(key=lambda x: -x.score)
         return hits[: top_k * len(self.collection_names)]
