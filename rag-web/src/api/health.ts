@@ -36,7 +36,15 @@ root.interceptors.response.use((res) => {
   return res;
 });
 
-/** 聚合就绪探测（Admin 总览 HealthOverview 数据源）。 */
+/** 聚合就绪探测（Admin 总览 HealthOverview 数据源）。
+ *
+ * m2：critical 依赖 down 时后端仍返回完整聚合体（仅状态码 503）——
+ * 503 必须视为有效响应，恰恰是故障时最需要看到七组件状态。
+ */
 export function getReady(): Promise<ReadyResponse> {
-  return root.get<ReadyResponse>("/ready").then((r) => r.data);
+  return root
+    .get<ReadyResponse>("/ready", {
+      validateStatus: (s) => s === 200 || s === 503,
+    })
+    .then((r) => r.data);
 }

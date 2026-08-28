@@ -79,8 +79,13 @@ export interface ChatRunInput {
   original_query: string;
   session_id: string;
   user_id: string;
+  /** 显式延迟档位（D4；auto 由 query_understanding 定档回写实际档位，02 §5） */
+  latency_tier: LatencyTier;
+  /** 请求级模型覆盖（J2，registry 条目名；null 用 generator 默认链） */
+  model?: string | null;
 }
 
+/** run config.configurable（C6 后已不再承载 tier/model，保留给未来扩展） */
 export interface RunConfigurable {
   latency_tier?: LatencyTier;
   model?: string | null;

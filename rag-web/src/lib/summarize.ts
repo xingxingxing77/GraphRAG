@@ -107,3 +107,30 @@ export function isAgentNode(node: string): node is AgentNodeName {
     "write_back",
   ].includes(node);
 }
+
+/**
+ * 从 messages-tuple 事件提取增量文本（J8 fast 档逐 token 直推）。
+ *
+ * 载荷可能为 [message, metadata] 元组或 message 本体；content 兼容
+ * string 与内容块数组（{type:"text", text}）两种形态。
+ *
+ * @param payload - messages 事件 data。
+ * @returns 增量文本（无可提取内容返回空串）。
+ */
+export function extractMessageChunk(payload: unknown): string {
+  const msg = (Array.isArray(payload) ? payload[0] : payload) as
+    | { content?: unknown }
+    | undefined;
+  const content = msg?.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((p) =>
+        typeof p === "string"
+          ? p
+          : String((p as { text?: string } | null)?.text ?? ""),
+      )
+      .join("");
+  }
+  return "";
+}

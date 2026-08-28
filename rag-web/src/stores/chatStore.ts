@@ -16,6 +16,8 @@ export interface ChatMessage {
   citations?: Citation[];
   degraded?: boolean;
   cacheHit?: boolean;
+  /** fast 档逐 token 直推中的活跃消息（values 终态到达时被替换） */
+  live?: boolean;
   /** 实际执行档位（auto 由 query_understanding 定档回写，架构 2.4 v3.1） */
   latencyTier?: string;
   /** deep 档已复核标识（7.1：忠实度校验通过） */
@@ -45,9 +47,16 @@ interface ChatState {
   faithfulnessScore: number | null;
   appendUserMessage(query: string): void;
   appendAssistant(msg: Omit<ChatMessage, "id" | "role">): void;
+  /** fast 档逐 token 直推（J8）：追加到活跃 live 消息（无则新建） */
+  appendStreamChunk(chunk: string): void;
   setStreaming(v: boolean): void;
   pushThoughtStep(node: AgentNodeName, summary: string): void;
-  setFinalAnswer(answer: string, citations: Citation[], reasons: DegradedReason[]): void;
+  setFinalAnswer(
+    answer: string,
+    citations: Citation[],
+    reasons: DegradedReason[],
+    latencyTier?: string | null,
+  ): void;
   consumeTypewriter(): void;
   pushDegraded(reasons: string[]): void;
   clearDegraded(): void;
@@ -86,6 +95,23 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     }));
   },
 
+  appendStreamChunk(chunk) {
+    set((s) => {
+      const last = s.messages[s.messages.length - 1];
+      if (last && last.role === "assistant" && last.live) {
+        const messages = [...s.messages];
+        messages[messages.length - 1] = { ...last, content: last.content + chunk };
+        return { messages };
+      }
+      return {
+        messages: [
+          ...s.messages,
+          { id: nextId(), role: "assistant", content: chunk, live: true },
+        ],
+      };
+    });
+  },
+
   setStreaming(v) {
     set({ streaming: v });
   },
@@ -94,16 +120,19 @@ export const useChatStore = create<ChatState>()((set, get) => ({
     set((s) => ({ thoughtSteps: [...s.thoughtSteps, { node, summary }] }));
   },
 
-  setFinalAnswer(answer, citations, reasons) {
+  setFinalAnswer(answer, citations, reasons, latencyTier) {
     const { degradedReasons } = get();
-    set({
+    set((s) => ({
       typewriterTarget: answer,
       degradedReasons: Array.from(new Set([...degradedReasons, ...reasons])),
-    });
+      // fast 档 live 流式消息由终态正式版替换（M1：终态为准）
+      messages: s.messages.filter((m) => !m.live),
+    }));
     get().appendAssistant({
       content: answer,
       citations,
       degraded: reasons.length > 0,
+      latencyTier: latencyTier ?? undefined,
     });
   },
 

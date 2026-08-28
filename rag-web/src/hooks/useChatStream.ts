@@ -15,6 +15,7 @@ import { precheck } from "@/api/precheck";
 import { bindJwt, ensureThread, streamRun } from "@/lib/agentClient";
 import {
   extractFinalState,
+  extractMessageChunk,
   isAgentNode,
   summarizeNodeUpdate,
 } from "@/lib/summarize";
@@ -138,13 +139,18 @@ export function useChatStream() {
       // 档位优先顺序：suggested_run（precheck 意图启发式）> 用户显式选择 > auto 兜底 standard
       const tier =
         suggestedTier ?? (chat.activeTier === "auto" ? "standard" : chat.activeTier);
-      const stream = streamRun(
-        threadId,
-        { original_query: normalizedQuery, session_id: threadId, user_id: user.id },
-        { latency_tier: tier, model: model ?? chat.model ?? null },
-      );
+      // C6：latency_tier/model 属 run 入参契约（ChatRunInput）——
+      // 经 config.configurable 传入时图内无人读取，选择会被静默忽略
+      const stream = streamRun(threadId, {
+        original_query: normalizedQuery,
+        session_id: threadId,
+        user_id: user.id,
+        latency_tier: tier,
+        model: model ?? chat.model ?? null,
+      });
 
-      // 读超时兜底（03 §7）：超时中断消费并按 CHAT_504_TIER_TIMEOUT 呈现（P0-07）
+      // 读超时兜底（03 §7）：按「无事件间隔」计时（每收到事件重置），
+      // 绝对时长会在 fast 档正常流式或慢依赖场景误报
       let timedOut = false;
       let timer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
         timedOut = true;
@@ -156,10 +162,17 @@ export function useChatStream() {
           timer = null;
         }
       };
+      const resetTimer = () => {
+        clearTimer();
+        timer = setTimeout(() => {
+          timedOut = true;
+        }, TIER_TIMEOUT_MS[tier]);
+      };
 
       try {
         for await (const ev of stream) {
           if (timedOut) break;
+          resetTimer();
           // SDK 1.x 事件为判别联合；兼容 ev.event 与 ev.data.event（P0-07 S-05）
           const raw = ev as unknown as Record<string, unknown>;
           const event =
@@ -193,16 +206,21 @@ export function useChatStream() {
               (raw.values as Record<string, unknown> | undefined) ??
               data;
             const fin = extractFinalState(valuesPayload as Record<string, unknown>);
-            chat.setFinalAnswer(fin.answer, fin.citations, fin.degradedReasons);
+            // m11：values 终态的实际档位回写消息（03 §3.6 契约）
+            chat.setFinalAnswer(fin.answer, fin.citations, fin.degradedReasons, fin.latencyTier);
           } else if (event === "error") {
             const err = (data.error ?? {}) as { code?: string };
             chat.appendAssistant({
               content: `⚠ ${mapErrorText(err.code ?? "SYS_500_INTERNAL")}`,
               degraded: false,
             });
-          } else if (event === "messages") {
-            // fast 档 messages-tuple 逐 token（P0-07 S-02 预留，不阻塞主链路）
-            // 暂不直接推流，由 values 终态统一落地，避免 M1 提前流出
+          } else if (event.startsWith("messages")) {
+            // messages-tuple 事件（含 v2 别名 messages/partial 等）。
+            // J8/M1：仅 fast 档逐 token 直推；standard/deep 缓冲式，
+            // 中间 token 不出折叠面板，由 values 终态统一落地
+            if (tier !== "fast") continue;
+            const chunk = extractMessageChunk((raw.data as unknown) ?? ev);
+            if (chunk) chat.appendStreamChunk(chunk);
           }
         }
       } finally {

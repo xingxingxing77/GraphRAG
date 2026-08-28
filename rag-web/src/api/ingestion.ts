@@ -5,9 +5,14 @@ import { http } from "./http";
 
 import type { IngestionRunRequest, PagedScanRecord, TaskAccepted } from "@/types";
 
-/** 触发采集扫描（full | incremental），202 + task_id。 */
+/** 触发采集扫描（full | incremental），202 + task_id。
+ *
+ * 后端同步执行全量扫描（full 档遍历语料目录），全局 10s 兜底不够用。
+ */
 export function runIngestion(body: IngestionRunRequest): Promise<TaskAccepted> {
-  return http.post<TaskAccepted>("/admin/ingestion/run", body).then((r) => r.data);
+  return http
+    .post<TaskAccepted>("/admin/ingestion/run", body, { timeout: 120_000 })
+    .then((r) => r.data);
 }
 
 /** 扫描结果列表（游标分页）。 */

@@ -4,7 +4,7 @@
  */
 import { Client } from "@langchain/langgraph-sdk";
 
-import type { ChatRunInput, RunConfigurable } from "@/types";
+import type { ChatRunInput } from "@/types";
 
 let _jwt: string | null = sessionStorage.getItem("rag_token");
 
@@ -48,23 +48,26 @@ export async function ensureThread(userId: string): Promise<string> {
   return _threadPromise;
 }
 
-/** 发起流式 run（streamMode 见 03 §3.3；fast 档由后端追加 messages）。 */
-export function streamRun(threadId: string, input: ChatRunInput, cfg: RunConfigurable) {
+/**
+ * 发起流式 run（streamMode 见 03 §3.3）。
+ *
+ * C2：必须请求 `values` —— langgraph-api 只下发被请求的 stream_mode，
+ * 缺 values 时终态 answer/citations/degraded_reasons 永远不到达
+ * （前端 values 分支依赖它落地最终答案）。
+ * 认证由模块级自定义 fetch 闭包合并 Authorization（见上），
+ * 无需经 payload 额外透传 headers。
+ */
+export function streamRun(threadId: string, input: ChatRunInput) {
   const payload = {
     input: { ...input },
-    config: { configurable: { ...cfg } },
-    streamMode: ["updates", "messages-tuple"] as ("updates" | "messages-tuple")[],
+    streamMode: ["updates", "values", "messages-tuple"] as (
+      | "updates"
+      | "values"
+      | "messages-tuple"
+    )[],
     multitaskStrategy: "interrupt" as const,
   };
-  // 显式透传 headers 以兼容 custom auth（P0-07）
-  const headers = _headers();
-  return client.runs.stream(
-    threadId,
-    import.meta.env.VITE_AGENT_ASSISTANT,
-    payload as unknown as Record<string, unknown> & { headers?: Record<string, string> },
-    // @ts-expect-error SDK 未声明 headers 透传，运行时 fetch 会合并
-    { headers } as unknown as undefined,
-  );
+  return client.runs.stream(threadId, import.meta.env.VITE_AGENT_ASSISTANT, payload);
 }
 
 export { _jwt };
