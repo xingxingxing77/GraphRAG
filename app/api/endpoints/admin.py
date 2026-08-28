@@ -162,9 +162,11 @@ async def _run_full_reindex(rec: "_TaskRecord") -> None:
         )
         rec.progress = 1.0
     finally:
+        # m13：Qdrant 客户端一并关闭（此前泄漏到进程退出）
         await redis.close()
         await es.close()
         await neo.close()
+        await qd.close()
 
 
 async def _run_rebuild(task_id: str, scope: str, full: bool) -> None:

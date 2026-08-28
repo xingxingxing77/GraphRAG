@@ -6,6 +6,8 @@
 """
 
 # --- 标准库 ---
+import asyncio
+import logging
 import time
 
 # --- 第三方库 ---
@@ -17,6 +19,8 @@ from starlette.types import ASGIApp
 # --- 本地模块 ---
 from app.api.rate_limit import RateLimiter
 
+logger = logging.getLogger(__name__)
+
 # 限流豁免路径（健康探针不受限）
 _RATE_LIMIT_EXEMPT_PREFIXES = ("/health", "/ready", "/metrics")
 
@@ -26,6 +30,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     主体解析优先级：X-API-Key → Authorization 指纹 → 客户端 IP。
     Redis 故障 fail-open（D5）；健康探针路径豁免。
+    limiter 未注入时，首个请求惰性接 Redis 存储（m4：create_app 为
+    同步上下文无法预建连接；Redis 不可达降级内存版并告警）。
     """
 
     def __init__(
@@ -39,20 +45,43 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         Args:
             app: ASGI 应用。
-            limiter: 限流器（缺省时用内存存储构建，生产注入 Redis 版）。
+            limiter: 限流器（None 时首个请求惰性构建 Redis 版，失败
+                降级内存版）。
             max_requests: 窗口期内最大请求数。
             window_seconds: 时间窗口（秒）。
         """
         super().__init__(app)
         self.max_requests = max_requests
         self.window_seconds = window_seconds
-        if limiter is None:
-            from app.api.rate_limit import InMemoryRateLimitStore
+        self._limiter = limiter
+        self._limiter_lock = asyncio.Lock()
 
-            limiter = RateLimiter(
-                InMemoryRateLimitStore(), max_requests, window_seconds
-            )
-        self.limiter = limiter
+    async def _get_limiter(self) -> RateLimiter:
+        """获取限流器（惰性构建 Redis 版，失败降级内存版，D5）。"""
+        if self._limiter is not None:
+            return self._limiter
+        async with self._limiter_lock:
+            if self._limiter is None:
+                from app.api.rate_limit import InMemoryRateLimitStore, RedisRateLimitStore
+
+                try:
+                    import app.api.deps as deps
+
+                    redis_client = await deps.shared_redis_client()
+                    self._limiter = RateLimiter(
+                        RedisRateLimitStore(redis_client),
+                        self.max_requests,
+                        self.window_seconds,
+                    )
+                    logger.info("限流存储已接入 Redis（固定窗口）")
+                except Exception as exc:  # noqa: BLE001 - Redis 不可达降级内存版
+                    logger.warning("Redis 限流存储构建失败，降级内存版: %s", exc)
+                    self._limiter = RateLimiter(
+                        InMemoryRateLimitStore(),
+                        self.max_requests,
+                        self.window_seconds,
+                    )
+            return self._limiter
 
     @staticmethod
     def _resolve_principal(request: Request) -> str:
@@ -89,7 +118,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         principal = self._resolve_principal(request)
-        allowed, retry_after = await self.limiter.check(principal)
+        limiter = await self._get_limiter()
+        allowed, retry_after = await limiter.check(principal)
         if not allowed:
             return JSONResponse(
                 status_code=429,

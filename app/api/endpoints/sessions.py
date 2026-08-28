@@ -21,6 +21,33 @@ from app.core.models import Paged, SessionMessage, SessionSummary
 router = APIRouter()
 
 
+async def _purge_session_memory(session_id: str) -> None:
+    """级联清理会话记忆层（07 A-05）：wm + rag_episodic。
+
+    M4：此前 thread 删除后 Redis wm:{session_id}（TTL 7 天兜底）与
+    Qdrant rag_episodic 点（保留 180 天）成孤儿数据。任一失败仅记
+    日志（D5：不阻断删除主流程）。
+    """
+    import logging
+
+    import app.api.deps as deps
+
+    logger = logging.getLogger(__name__)
+    try:
+        stack = await deps.get_memory_stack()
+    except Exception as exc:  # noqa: BLE001 - 记忆栈不可用不阻断删除
+        logger.warning("删除会话 %s：记忆栈不可用，跳过记忆清理: %s", session_id, exc)
+        return
+    try:
+        await stack.working_memory.clear(session_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("删除会话 %s：wm 清理失败: %s", session_id, exc)
+    try:
+        await stack.episodic.delete_by_session(session_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("删除会话 %s：episodic 清理失败: %s", session_id, exc)
+
+
 @router.get("", response_model=Paged[SessionSummary])
 async def list_sessions(
     cursor: str | None = None,
@@ -102,5 +129,7 @@ async def delete_session(
     )
     if not deleted:
         raise ApiError(ErrorCode.SESSION_404_NOT_FOUND, "会话不存在或非本人")
+    # 07 A-05：thread 删除成功后级联清理记忆层（wm/episodic，M4）
+    await _purge_session_memory(session_id)
     response.status_code = 204
     return response

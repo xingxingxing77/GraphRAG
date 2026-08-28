@@ -154,7 +154,8 @@ class AppSettings(BaseSettings):
     # Qdrant 配置
     qdrant_host: str = Field(default="localhost", description="Qdrant 服务地址")
     qdrant_port: int = Field(default=6333, description="Qdrant gRPC 端口")
-    qdrant_collection: str = Field(default="graphrag_docs", description="默认 Collection 名称")
+    # m10：qdrant_collection 死键已删除——实际集合名按文档类型为
+    # rag_{doc_type}（vector_indexer 动态 ensure_collection）
 
     # Neo4j 配置
     neo4j_uri: str = Field(default="bolt://localhost:7687", description="Neo4j 连接 URI")
@@ -177,10 +178,9 @@ class AppSettings(BaseSettings):
         description="Postgres checkpoint 连接串",
     )
 
-    # 检索配置
-    retrieval_top_k: int = Field(default=20, description="粗排召回数量")
-    rerank_top_k: int = Field(default=5, description="精排后保留数量")
-    rerank_threshold: float = Field(default=0.3, description="Reranker 分数阈值")
+    # m10：retrieval_top_k/rerank_top_k/rerank_threshold 死键已删除——
+    # Agent 主链路召回数硬编码于 tool_router._STEP_TOP_K，精排未接线；
+    # 恢复对应能力时同步补 config 键与读取方
 
     # LangSmith 配置（第 10 层可观测）
     langchain_tracing_v2: bool = Field(default=False, description="LangSmith 追踪开关")

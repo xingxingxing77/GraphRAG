@@ -121,17 +121,21 @@ class RateLimiter:
         self.window_seconds = window_seconds
 
     @staticmethod
-    def window_key(principal: str) -> str:
-        """构造分钟窗口键（04 §4：rl:{principal}:{minute}）。
+    def window_key(principal: str, window_seconds: int = DEFAULT_WINDOW_SECONDS) -> str:
+        """构造固定窗口键（04 §4：rl:{principal}:{window_start}）。
+
+        m4：窗口起点按 window_seconds 切分（原实现固定 60s 分钟桶，
+        配置非 60s 时实际窗口与 Retry-After 口径不一致）。
 
         Args:
             principal: 主体标识（用户 ID / API Key 指纹 / IP）。
+            window_seconds: 窗口长度（秒）。
 
         Returns:
             限流键。
         """
-        minute = int(time.time() // 60)
-        return f"rl:{principal}:{minute}"
+        window_start = int(time.time() // max(1, window_seconds))
+        return f"rl:{principal}:{window_start}"
 
     async def check(self, principal: str) -> tuple[bool, int]:
         """检查主体是否超限。
@@ -144,7 +148,7 @@ class RateLimiter:
         Returns:
             (是否放行, Retry-After 秒数)；放行时 Retry-After 为 0。
         """
-        key = self.window_key(principal)
+        key = self.window_key(principal, self.window_seconds)
         try:
             count = await self.store.hit(key, self.window_seconds)
         except Exception as exc:  # noqa: BLE001 - fail-open

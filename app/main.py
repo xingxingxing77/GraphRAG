@@ -118,7 +118,8 @@ def create_app() -> FastAPI:
         expose_headers=["X-Degraded"],
     )
 
-    # 全局限流（单元 9.2，D6）：默认关闭，生产经 RATE_LIMIT_ENABLED 开启
+    # 全局限流（单元 9.2，D6）：默认关闭，生产经 RATE_LIMIT_ENABLED 开启；
+    # limiter 惰性接 Redis 存储（m4），失败降级内存版（D5）
     if settings.rate_limit_enabled:
         from app.api.middleware import RateLimitMiddleware
 
@@ -127,6 +128,11 @@ def create_app() -> FastAPI:
             max_requests=settings.rate_limit_max_requests,
             window_seconds=settings.rate_limit_window_seconds,
         )
+
+    # m12：请求耗时统计（X-Process-Time 契约，02 §6）——原定义未挂载
+    from app.api.middleware import TimingMiddleware
+
+    app.add_middleware(TimingMiddleware)
 
     # --- 统一错误体（02 §2.3 {code, message, detail}） ---
     @app.exception_handler(ApiError)

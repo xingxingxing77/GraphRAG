@@ -136,12 +136,8 @@ async def get_reranker() -> AsyncGenerator[BGEReranker, None]:
 _reranker: BGEReranker | None = None
 
 
-async def get_redis_client() -> AsyncGenerator[RedisClient, None]:
-    """获取 Redis 客户端实例（依赖注入，单例复用连接）。
-
-    Yields:
-        RedisClient: 已配置的 Redis 客户端（首用时建立连接）。
-    """
+async def shared_redis_client() -> RedisClient:
+    """获取 Redis 单例（纯函数形态，供 Depends 之外的模块复用，m4）。"""
     global _redis_client
     if _redis_client is None:
         async with _redis_lock:
@@ -150,7 +146,16 @@ async def get_redis_client() -> AsyncGenerator[RedisClient, None]:
                 _redis_client = RedisClient(
                     host=settings.redis_host, port=settings.redis_port, db=settings.redis_db
                 )
-    yield _redis_client
+    return _redis_client
+
+
+async def get_redis_client() -> AsyncGenerator[RedisClient, None]:
+    """获取 Redis 客户端实例（依赖注入，单例复用连接）。
+
+    Yields:
+        RedisClient: 已配置的 Redis 客户端（首用时建立连接）。
+    """
+    yield await shared_redis_client()
 
 
 _redis_client: RedisClient | None = None
@@ -402,6 +407,8 @@ async def get_memory_stack() -> MemoryStack:
                     threshold=mem["l1_hit_threshold"],
                     l1_ttl_seconds=mem["l1_ttl_seconds"],
                     l2_ttl_seconds=mem["l2_ttl_seconds"],
+                    # M6：缓存条目按向量模型隔离（换模型防缓存污染）
+                    embedding_model=settings.embedding_model,
                 )
                 _memory_stack = MemoryStack(
                     redis=redis,

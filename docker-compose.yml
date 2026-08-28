@@ -15,6 +15,19 @@ services:
     ports:
       - "8000:8000"
     env_file: .env
+    # C5：与 agent 服务同口径的容器网络覆盖——.env 是宿主机视角
+    # （localhost），容器内 app 服务不覆盖则依赖存储全线指向自身
+    environment:
+      QDRANT_HOST: qdrant
+      REDIS_HOST: redis
+      ELASTICSEARCH_HOST: http://elasticsearch:9200
+      NEO4J_URI: bolt://neo4j:7687
+      DATABASE_URI: postgresql://graphrag:graphrag@postgres:5432/graphrag
+      POSTGRES_DSN: postgresql://graphrag:graphrag@postgres:5432/graphrag
+      # langgraph-server 在另一容器（thread/session 代理指向它）
+      LANGGRAPH_SERVER_URL: http://agent:8001
+      # Ollama 为宿主机原生安装（不容器化），见底部说明
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
     extra_hosts:
       - "host.docker.internal:host-gateway"   # Linux 下访问宿主 Ollama
     depends_on:
@@ -38,6 +51,15 @@ services:
     ports:
       - "8001:8001"
     env_file: .env
+    # 同 app 服务：.env 宿主机视角地址在容器内不可达，按容器网络覆盖
+    environment:
+      QDRANT_HOST: qdrant
+      REDIS_HOST: redis
+      ELASTICSEARCH_HOST: http://elasticsearch:9200
+      NEO4J_URI: bolt://neo4j:7687
+      DATABASE_URI: postgresql://graphrag:graphrag@postgres:5432/graphrag
+      POSTGRES_DSN: postgresql://graphrag:graphrag@postgres:5432/graphrag
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -47,6 +69,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      # langgraph dev 为 in-mem 变体（api_variant=local_dev）：thread/assistant 与
+      # checkpoint 由 langgraph_runtime_inmem._persistence 落盘到 cwd 下的
+      # .langgraph_api/*.pckl，而非 DATABASE_URI 指向的 Postgres（实测 graphrag 库零表）。
+      # 不挂卷则容器重建即丢全部会话，与 J21「Postgres 为权威源」的设计意图不符。
+      - langgraph_api:/srv/.langgraph_api
     restart: unless-stopped
 
   # --- LangGraph thread checkpoint (J21 会话状态权威源) ---
@@ -78,7 +106,9 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:6333/readyz || exit 1"]
+      # 镜像内无 wget/curl，原 `wget -qO-` 探测恒为 unhealthy，会让依赖它的
+      # app/agent（depends_on: service_healthy）永远等不到就绪 → 改用 bash /dev/tcp
+      test: ['CMD', 'bash', '-c', 'exec 3<>/dev/tcp/127.0.0.1/6333 && printf "GET /readyz HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q 200']
       interval: 10s
       timeout: 3s
       retries: 5
@@ -143,6 +173,7 @@ services:
   # 容器内访问地址: http://host.docker.internal:11434 (见 config/models.yaml local-qwen7b)
 
 volumes:
+  langgraph_api:
   pg_data:
   qdrant_data:
   neo4j_data:

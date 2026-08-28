@@ -100,10 +100,8 @@ class EpisodicMemory:
             timestamp: 入库 unix 秒（默认取系统时间）。
         """
         await self.qdrant.ensure_collection(RAG_EPISODIC_COLLECTION)
-        result = await self.embedder.embed(
-            [self._compose_text(question, answer)]
-        )
-        vector = result.dense[0]
+        # M7：dense-only 场景走 embed_dense，免跑稀疏编码
+        vector = (await self.embedder.embed_dense([self._compose_text(question, answer)]))[0]
         await self.qdrant.upsert_points(
             RAG_EPISODIC_COLLECTION,
             [
@@ -142,8 +140,8 @@ class EpisodicMemory:
             相关性降序的命中列表；存储异常时返回空列表（不阻塞主链路）。
         """
         try:
-            result = await self.embedder.embed([query])
-            vector = result.dense[0]
+            # M7：dense-only 检索向量
+            vector = (await self.embedder.embed_dense([query]))[0]
             flt = Filter(
                 must=[FieldCondition(key="user_id", match=MatchValue(value=user_id))],
                 must_not=(

@@ -100,14 +100,28 @@ class SemanticCache:
         threshold: float = L1_HIT_THRESHOLD,
         l1_ttl_seconds: int = 3600,
         l2_ttl_seconds: int = 600,
+        embedding_model: str = "",
     ) -> None:
-        """初始化语义缓存。"""
+        """初始化语义缓存。
+
+        Args:
+            qdrant: Qdrant 客户端。
+            embedder: Embedding 服务（dense 通道）。
+            redis: Redis 客户端（L2）。
+            threshold: L1 命中阈值。
+            l1_ttl_seconds: L1 应用层 TTL（每日 purge_expired 清理）。
+            l2_ttl_seconds: L2 Redis TTL。
+            embedding_model: 向量模型名（M6：进 point_id 材料与 payload
+                过滤，换模型后新旧向量处于不同语义空间，必须互相隔离
+                防缓存污染；空串仅用于测试替身）。
+        """
         self.qdrant = qdrant
         self.embedder = embedder
         self.redis = redis
         self.threshold = threshold
         self.l1_ttl_seconds = l1_ttl_seconds
         self.l2_ttl_seconds = l2_ttl_seconds
+        self.embedding_model = embedding_model
         # single-flight：norm_hash → 回源任务（并发同查询合并为一次加载）
         self._inflight: dict[str, asyncio.Task[L1Lookup]] = {}
         self._inflight_lock = asyncio.Lock()
@@ -128,11 +142,11 @@ class SemanticCache:
         return hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
 
     async def _query_vector(self, query: str) -> list[float]:
-        """查询文本 → dense 向量（BGE-M3 dense 通道）。"""
-        result = await self.embedder.embed([query])
-        if not result.dense or not result.dense[0]:
+        """查询文本 → dense 向量（BGE-M3 dense 通道，M7：dense-only）。"""
+        vector = (await self.embedder.embed_dense([query]))[0]
+        if not vector:
             raise ValueError("embedding 返回空 dense 向量")
-        return result.dense[0]
+        return vector
 
     # ---------- L1：Qdrant rag_cache ----------
 
@@ -168,7 +182,13 @@ class SemanticCache:
             fresh_from = int(time.time()) - self.l1_ttl_seconds
             flt = Filter(
                 must=[
-                    FieldCondition(key="created_at", range=Range(gte=float(fresh_from)))
+                    FieldCondition(key="created_at", range=Range(gte=float(fresh_from))),
+                    # M6：只命中同一向量模型的条目——不同模型/维度的向量
+                    # 不可比，跨模型命中会返回语义无关的旧答案
+                    FieldCondition(
+                        key="embedding_model",
+                        match=MatchValue(value=self.embedding_model),
+                    ),
                 ]
             )
             try:
@@ -236,11 +256,19 @@ class SemanticCache:
                 await self.qdrant.ensure_payload_index(
                     RAG_CACHE_COLLECTION, "created_at"
                 )
+                await self.qdrant.ensure_payload_index(
+                    RAG_CACHE_COLLECTION, "embedding_model"
+                )
             except Exception as exc:
                 logger.debug("ensure_payload_index 自愈忽略: %s", exc)
             vector = await self._query_vector(entry.question)
+            # M6：point_id 材料含向量模型——同问题换模型后写为新点，
+            # 旧模型点由读侧 Filter 天然隔离
             point_id = str(
-                uuid.uuid5(_POINT_ID_NAMESPACE, self.normalize(entry.question))
+                uuid.uuid5(
+                    _POINT_ID_NAMESPACE,
+                    f"{self.embedding_model}|{self.normalize(entry.question)}",
+                )
             )
             point = PointStruct(
                 id=point_id,
@@ -256,6 +284,7 @@ class SemanticCache:
                     "latency_tier": entry.latency_tier,
                     "created_at": int(time.time()),
                     "model": entry.model,
+                    "embedding_model": self.embedding_model,
                 },
             )
             await self.qdrant.upsert_points(RAG_CACHE_COLLECTION, [point])

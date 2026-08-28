@@ -74,7 +74,8 @@ pipeline:
     batch_size: 100
     update_mode: incremental     # full | incremental
     qdrant:
-      collection: graphrag_docs
+      # 实际集合名为 rag_{doc_type}（app/pipeline/indexing/vector_indexer.py
+      # 按文档类型动态建集合），本节其余参数与 ensure_collection 对齐
       dense_vector_size: 1024
       distance: cosine
       m: 16
@@ -83,16 +84,12 @@ pipeline:
       text_index_name: entity_fulltext
       indexed_labels: [Entity, Recipe]
 
-# 检索配置
+# 检索配置（m10 死键清理：top_k/rerank/rerank_model/rerank_top_k/
+# rerank_threshold/compression_strategy 曾无任何读取方——Agent 主链路
+# 的召回数硬编码于 tool_router._STEP_TOP_K=10，精排未接线。恢复对应
+# 能力时先在代码里接上读取，再回填本节）
 retrieval:
-  mode: hybrid                   # vector_only | keyword_only | hybrid
-  top_k: 20                      # 粗排召回数
-  rerank: true
-  rerank_model: bge-reranker-v2-m3
-  rerank_top_k: 5
-  rerank_threshold: 0.3
-  fusion: rrf                    # rrf | weighted
-  compression_strategy: none     # llm_extract | extractive | none (J11; deep 档默认 llm_extract)
+  fusion: rrf                    # rrf | weighted（FusionEngine 读取）
   weights:
     dense: 0.4
     sparse: 0.2
@@ -127,7 +124,7 @@ query_understanding:
 # Agent 第 6 层 A/B/E 系列优化项（架构 8.2）
 agent:
   parallel_fanout: deep_only   # A1: deep 档无依赖子步骤并行扇出
-  reflect_skip_threshold: 0.7  # A2: Top-K 平均 Rerank 分短路阈值
+  reflect_skip_threshold: 0.7  # A2: Top-K 归一化检索分均分短路阈值（M2 起各路检索分已归一 [0,1]）
   evidence_enough_count: 5     # A2: 有效证据数下限
   evidence_prune:
     keep_score: 0.25           # B3: 轮间修剪保留分线

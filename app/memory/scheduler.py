@@ -125,10 +125,11 @@ class MemoryScheduler:
         kept: list[EpisodicHit] = []
         removed = 0
         if candidates and wm_texts:
-            wm_vectors = (await self.embedder.embed(wm_texts)).dense
-            cand_vectors = (
-                await self.embedder.embed([c.question + "\n" + c.answer for c in candidates])
-            ).dense
+            # M7：dense-only 相似度计算走 embed_dense，免跑稀疏编码
+            wm_vectors = await self.embedder.embed_dense(wm_texts)
+            cand_vectors = await self.embedder.embed_dense(
+                [c.question + "\n" + c.answer for c in candidates]
+            )
             for hit, cvec in zip(candidates, cand_vectors, strict=True):
                 max_sim = max(
                     (_cosine(cvec, wvec) for wvec in wm_vectors), default=0.0

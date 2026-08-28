@@ -18,10 +18,11 @@ from pathlib import Path
 from typing import Any
 
 # --- 第三方库 ---
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi import HTTPException
 from pydantic import BaseModel
 
+from app.api.security import get_current_user
 from app.skills.registry import create_skill_dir, get_skill_registry, get_skills_root
 
 router = APIRouter()
@@ -117,11 +118,17 @@ async def list_skills() -> list[dict[str, Any]]:
 
 
 @router.post("/skills", response_model=SkillCreateResponse)
-async def create_skill(req: SkillCreateRequest) -> SkillCreateResponse:
+async def create_skill(
+    req: SkillCreateRequest,
+    user: dict[str, Any] = Depends(get_current_user),
+) -> SkillCreateResponse:
     """创建 Skill（落盘 <skills_root>/<name>/SKILL.md 并注册）。
+
+    M10：写端点须持 JWT（与全站其余写端点一致），防匿名批量落盘。
 
     Args:
         req: name/description/content。
+        user: JWT 用户声明。
 
     Returns:
         SkillCreateResponse
@@ -136,11 +143,17 @@ async def create_skill(req: SkillCreateRequest) -> SkillCreateResponse:
 
 
 @router.post("/skills/upload")
-async def upload_skill_file(file: UploadFile = File(...)) -> dict[str, Any]:
+async def upload_skill_file(
+    file: UploadFile = File(...),
+    user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
     """上传 SKILL.md 文件创建 Skill（multipart，回退解析文件名作为 name）。
+
+    M10：写端点须持 JWT（同 create_skill）。
 
     Args:
         file: SKILL.md 文件。
+        user: JWT 用户声明。
 
     Returns:
         dict
@@ -160,11 +173,17 @@ async def upload_skill_file(file: UploadFile = File(...)) -> dict[str, Any]:
 
 
 @router.post("/attach")
-async def attach_files(files: list[UploadFile] = File(...)) -> dict[str, Any]:
+async def attach_files(
+    files: list[UploadFile] = File(...),
+    user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
     """接收附件上传（落盘 data/uploads/prompt-bar/<uuid>/ 并回显）。
+
+    M10：写端点须持 JWT，防匿名无限批量写入磁盘。
 
     Args:
         files: 上传文件列表。
+        user: JWT 用户声明。
 
     Returns:
         dict: 回显文件名与 url。

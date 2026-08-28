@@ -11,6 +11,7 @@
 # --- 标准库 ---
 import logging
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,46 @@ class LLMUnavailable(Exception):
     generator 节点捕获后降级轻量模型并置 degraded=True
     （X-Degraded: llm-fallback）。
     """
+
+
+# base_url 里的 ${VAR} 占位符：部署拓扑相关地址不写死在 YAML（宿主经
+# localhost 可达的 Ollama，在 agent 容器内 localhost 指容器自身 → 连接被拒，
+# 须按环境注入 host.docker.internal）。与 api_key_ref 同一注入思路（D7）。
+_ENV_TOKEN = re.compile(r"\$\{(\w+)}")
+
+
+def _expand_env(value: str) -> str:
+    """展开字符串中的 ${VAR} 占位符。
+
+    取值优先 os.environ（compose/容器注入），缺省回落 AppSettings 同名字段
+    默认值 —— 使宿主裸跑无需任何配置即保持原行为。
+
+    Args:
+        value: 可能含 ${VAR} 的字符串。
+
+    Returns:
+        展开后的字符串（无占位符则原样返回）。
+
+    Raises:
+        SystemExit: 占位符引用的变量既不在环境中也无配置默认值（fail-fast）。
+    """
+    from app.core.config import get_settings
+
+    def _sub(match: re.Match[str]) -> str:
+        name = match.group(1)
+        # m5：空串视同未设置——`OLLAMA_BASE_URL=` 之类空值若直接放行，
+        # base_url 会静默变成 "/v1" 打向非法地址
+        raw = os.environ.get(name) or None
+        if raw is None:
+            alt = getattr(get_settings(), name.lower(), None)
+            if alt is None:
+                raise SystemExit(
+                    f"[fail-fast] models.yaml 占位符引用未配置的变量: {name}"
+                )
+            raw = str(alt)
+        return raw
+
+    return _ENV_TOKEN.sub(_sub, value)
 
 
 class ModelsConfig(BaseModel):
@@ -97,6 +138,10 @@ class ModelRegistry:
             raw = yaml.safe_load(f)
         if raw is None:
             raise SystemExit(f"[fail-fast] 模型注册表为空: {path}")
+        # 地址类字段按运行环境展开（同一 YAML 需在宿主/容器两种拓扑下可用）
+        for entry in (raw.get("models") or {}).values():
+            if isinstance(entry, dict) and isinstance(entry.get("base_url"), str):
+                entry["base_url"] = _expand_env(entry["base_url"])
         try:
             config = ModelsConfig.model_validate(raw)
         except Exception as exc:  # pydantic 校验错误聚合抛出

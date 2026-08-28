@@ -37,6 +37,15 @@ REQUIRED_ENDPOINTS: set[tuple[str, str]] = {
     ("POST", "/api/v1/admin/debug/analyze"),  # 单元 3.2
     ("POST", "/api/v1/admin/debug/retrieve"),  # 单元 3.3-3.5
     ("POST", "/api/v1/admin/debug/rerank"),  # 单元 4.1
+    # 单元 14 prompt-bar（14 1:1 复刻占位端点；写端点已加 JWT 鉴权 M10，
+    # 02 §3.12 文字登记待补——先入契约门禁防继续漂移）
+    ("GET", "/api/v1/prompt-bar/sources"),
+    ("GET", "/api/v1/prompt-bar/commands"),
+    ("GET", "/api/v1/prompt-bar/skills"),
+    ("POST", "/api/v1/prompt-bar/skills"),
+    ("POST", "/api/v1/prompt-bar/skills/upload"),
+    ("POST", "/api/v1/prompt-bar/attach"),
+    ("POST", "/api/v1/prompt-bar/integrations/{provider}/connect"),
     ("GET", "/health"),
     ("GET", "/ready"),
     ("GET", "/metrics"),  # 单元 3.6

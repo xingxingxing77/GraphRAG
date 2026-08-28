@@ -115,9 +115,7 @@ class QdrantDBClient:
             # （缺失会导致 Range 过滤恒 miss / 失效联动不生效，变相 no-cache）
             if collection_name in ("rag_cache", "rag_episodic"):
                 try:
-                    await self.ensure_payload_index(collection_name, "created_at")
-                    if collection_name == "rag_cache":
-                        await self.ensure_payload_index(collection_name, "matched_doc_ids")
+                    await self._ensure_memory_payload_indexes(collection_name)
                 except Exception as exc:  # noqa: BLE001
                     import logging as _log
 
@@ -134,13 +132,32 @@ class QdrantDBClient:
         # 新建后立即建 payload 索引（避免首批写入后过滤不生效）
         if collection_name in ("rag_cache", "rag_episodic"):
             try:
-                await self.ensure_payload_index(collection_name, "created_at")
-                if collection_name == "rag_cache":
-                    await self.ensure_payload_index(collection_name, "matched_doc_ids")
+                await self._ensure_memory_payload_indexes(collection_name)
             except Exception as exc:  # noqa: BLE001
                 import logging as _log
 
                 _log.getLogger(__name__).warning("ensure_payload_index 自愈失败 %s: %s", collection_name, exc)
+
+    async def _ensure_memory_payload_indexes(self, collection_name: str) -> None:
+        """按集合口径建立 payload 索引（m3：与实际 payload 字段对齐）。
+
+        - rag_cache：created_at（TTL Range 过滤）+ matched_doc_ids（失效
+          联动反查）+ embedding_model（M6 模型隔离过滤）；
+        - rag_episodic：timestamp（purge_expired Range 依据——payload 写的
+          是 timestamp 而非 created_at，原索引字段错位形同全表扫描）+
+          user_id/session_id（隔离与排除过滤，keyword）。
+
+        Args:
+            collection_name: 集合名。
+        """
+        if collection_name == "rag_cache":
+            await self.ensure_payload_index(collection_name, "created_at")
+            await self.ensure_payload_index(collection_name, "matched_doc_ids")
+            await self.ensure_payload_index(collection_name, "embedding_model")
+        else:
+            await self.ensure_payload_index(collection_name, "timestamp")
+            await self.ensure_payload_index(collection_name, "user_id")
+            await self.ensure_payload_index(collection_name, "session_id")
 
     async def upsert_points(
         self,
@@ -429,6 +446,7 @@ class QdrantDBClient:
 
         rag_cache 的 created_at（integer）与 matched_doc_ids（keyword 数组）
         需建索引后 Range/匹配过滤才高效且可靠；缺失时变相恒 miss 触发 no-cache。
+        m3：rag_episodic 的 timestamp 同为 integer Range 依据，一并纳入推断。
 
         Args:
             collection_name: 集合名。
@@ -445,8 +463,10 @@ class QdrantDBClient:
                 return
         except Exception:
             pass
-        # 按字段类型选择索引
-        field_type = "integer" if field_name == "created_at" else "keyword"
+        # 按字段类型选择索引（时间戳字段 integer 走 Range，其余 keyword）
+        field_type = (
+            "integer" if field_name in ("created_at", "timestamp") else "keyword"
+        )
         try:
             await client.create_payload_index(
                 collection_name=collection_name,
